@@ -298,7 +298,8 @@ async def create_rule(data: RuleInput, user: dict = Depends(get_current_user)):
         "created_at": now_iso(),
     }
     await db.rules.insert_one(doc)
-    return {k: v for k, v in doc.items()}
+    doc.pop("_id", None)
+    return doc
 
 
 @api.put("/rules/{rule_id}")
@@ -450,7 +451,8 @@ async def add_comment(match_id: str, data: CommentInput, user: dict = Depends(ge
         "created_at": now_iso(),
     }
     await db.comments.insert_one(doc)
-    return {**{k: v for k, v in doc.items()}, "name": user["name"], "picture": user.get("picture")}
+    doc.pop("_id", None)
+    return {**doc, "name": user["name"], "picture": user.get("picture")}
 
 
 # --- Leaderboard -----------------------------------------------------------
@@ -493,7 +495,8 @@ async def add_patch_note(data: PatchNoteInput, user: dict = Depends(get_current_
         "created_at": now_iso(),
     }
     await db.patch_notes.insert_one(doc)
-    return {**{k: v for k, v in doc.items()}, "author_name": user["name"]}
+    doc.pop("_id", None)
+    return {**doc, "author_name": user["name"]}
 
 
 @api.get("/")

@@ -17,7 +17,7 @@ export default function PatchNotes() {
   const [saving, setSaving] = useState(false);
 
   const load = () => api.get("/patch-notes").then((r) => setNotes(r.data)).catch((e) => { toast.error(formatError(e.response?.data?.detail)); setNotes([]); });
-  useEffect(load, []);
+  useEffect(() => { load(); }, []);
 
   const save = async () => {
     if (!form.title.trim() || !form.description.trim()) { toast.error("Fyll i rubrik och beskrivning"); return; }

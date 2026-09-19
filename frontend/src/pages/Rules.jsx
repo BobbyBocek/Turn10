@@ -11,7 +11,7 @@ export default function Rules() {
   const [rules, setRules] = useState(null);
 
   const load = () => api.get("/rules").then((r) => setRules(r.data)).catch((e) => { toast.error(formatError(e.response?.data?.detail)); setRules([]); });
-  useEffect(load, []);
+  useEffect(() => { load(); }, []);
 
   const del = async (id) => {
     try { await api.delete(`/rules/${id}`); setRules((prev) => prev.filter((r) => r.id !== id)); toast.success("Regel borttagen"); }

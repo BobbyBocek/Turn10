@@ -1,0 +1,41 @@
+{
+  "summary": "Full end-to-end testing of Kortkväll (Swedish card-game app). Backend: 19/19 pytest cases green after fixing 3 ObjectId serialization bugs. Frontend: complete flow works — login (admin), 3-step Ny match (players → rules+custom rule → placements), Elo badges on match detail, comments (text + emoji), Historik, Topplista with sort, Regler (with delete), Patch-notes add, search filter, logout, protected-route redirect, wrong-password Swedish error. Fixed 3 additional React useEffect bugs that crashed Rules & PatchNotes pages ('destroy is not a function').",
+  "backend_issues": {
+    "critical": [],
+    "minor": []
+  },
+  "frontend_issues": {
+    "ui_bugs": [],
+    "integration_issues": [],
+    "design_issues": [
+      {"screen": "Login", "issues": ["React warning: 'Cannot update a component (BrowserRouter) while rendering a different component (Login)'. Likely calling navigate() or setState during render (e.g. inside body of Login when user is already authenticated). Non-blocking but should be moved into useEffect."]}
+    ]
+  },
+  "test_report_links": [
+    "/app/backend/tests/backend_test.py",
+    "/app/test_reports/pytest/pytest_results.xml"
+  ],
+  "action_items": [
+    "Fix setState-in-render warning in /app/frontend/src/pages/Login.jsx (wrap the auto-redirect in a useEffect instead of calling <Navigate/> or navigate() during render)."
+  ],
+  "critical_code_review_comments": [
+    "Bug (FIXED by tester): POST /api/rules, POST /api/matches/{id}/comments and POST /api/patch-notes returned 500 because motor's insert_one mutates the passed dict adding an ObjectId `_id`, which FastAPI cannot serialize. Fixed by doc.pop('_id', None) before returning.",
+    "Bug (FIXED by tester): Rules.jsx, PatchNotes.jsx and MatchDetail.jsx used `useEffect(load, [])` where `load` returns a Promise. React tried to invoke the Promise as a cleanup function producing 'destroy is not a function' runtime error, breaking the whole page. Wrapped calls in `useEffect(() => { load(); }, [...])`.",
+    "Enhancement: consider a shared error boundary at the ProtectedLayout level so a single component failure doesn't blank the entire screen.",
+    "Enhancement: /api/leaderboard sorting is done server-side by rating only; the frontend Topplista supports column sort — verified working, but confirm large-dataset sort is consistent."
+  ],
+  "updated_files": [
+    "/app/backend/server.py",
+    "/app/frontend/src/pages/Rules.jsx",
+    "/app/frontend/src/pages/PatchNotes.jsx",
+    "/app/frontend/src/pages/MatchDetail.jsx",
+    "/app/backend/tests/backend_test.py"
+  ],
+  "success_rate": {"backend": "100% (19/19)", "frontend": "~95% (all core flows pass; one non-blocking React warning on Login)"},
+  "test_credentials": "Admin tom.jenssen@live.se / Kortspel2026!  ·  Players erik/johan/anders/sara/lisa @test.se / Spela123!",
+  "seed_data_creation": "None manually — used built-in seed. Created a few TEST_ patch notes and matches during UI testing (data persists in test DB).",
+  "retest_needed": false,
+  "should_main_agent_self_test": true,
+  "context_for_next_testing_agent": "Backend tests live at /app/backend/tests/backend_test.py (pytest, 19 cases covering auth, users, positions, rules CRUD, matches with Elo delta validation, comments, patch-notes). Routes are Swedish: /regler, /historik, /topplista, /patchnotes. Ensure `useEffect(load, [])` pattern isn't reintroduced. Emergent Google OAuth external flow was not exercised — only the JWT email/password flow was tested end-to-end.",
+  "rca_of_the_issue": "Two classes of bugs found and fixed: (1) MongoDB inserted docs were returned directly, exposing non-serializable ObjectId _id → 500. (2) useEffect(load) where load returns a Promise caused React to call the promise as a cleanup fn on unmount → 'destroy is not a function' runtime error breaking Rules & PatchNotes screens."
+}

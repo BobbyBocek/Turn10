@@ -1,0 +1,194 @@
+"""Backend regression tests for Kortkväll app."""
+import os
+import uuid
+import pytest
+import requests
+
+BASE_URL = os.environ.get('REACT_APP_BACKEND_URL', 'https://rating-cards-2.preview.emergentagent.com').rstrip('/')
+API = f"{BASE_URL}/api"
+
+ADMIN_EMAIL = "tom.jenssen@live.se"
+ADMIN_PASSWORD = "Kortspel2026!"
+PLAYERS = ["erik@test.se", "johan@test.se", "anders@test.se", "sara@test.se", "lisa@test.se"]
+PLAYER_PW = "Spela123!"
+
+
+@pytest.fixture(scope="session")
+def admin_session():
+    s = requests.Session()
+    r = s.post(f"{API}/auth/login", json={"email": ADMIN_EMAIL, "password": ADMIN_PASSWORD})
+    assert r.status_code == 200, r.text
+    return s
+
+
+# --- Auth -----------------------------------------------------------------
+class TestAuth:
+    def test_login_success(self):
+        r = requests.post(f"{API}/auth/login", json={"email": ADMIN_EMAIL, "password": ADMIN_PASSWORD})
+        assert r.status_code == 200
+        d = r.json()
+        assert d["email"] == ADMIN_EMAIL
+        assert "id" in d
+        assert r.cookies.get("access_token")
+
+    def test_login_wrong_password(self):
+        r = requests.post(f"{API}/auth/login", json={"email": ADMIN_EMAIL, "password": "wrong"})
+        assert r.status_code == 401
+        assert "Fel" in r.json().get("detail", "")
+
+    def test_me_requires_auth(self):
+        r = requests.get(f"{API}/auth/me")
+        assert r.status_code == 401
+
+    def test_me_with_cookie(self, admin_session):
+        r = admin_session.get(f"{API}/auth/me")
+        assert r.status_code == 200
+        assert r.json()["email"] == ADMIN_EMAIL
+
+    def test_register_duplicate(self):
+        r = requests.post(f"{API}/auth/register", json={"name": "X", "email": ADMIN_EMAIL, "password": "x"})
+        assert r.status_code == 400
+
+    def test_register_new_and_login(self):
+        email = f"test_{uuid.uuid4().hex[:8]}@test.se"
+        r = requests.post(f"{API}/auth/register", json={"name": "Ny", "email": email, "password": "Hemligt1!"})
+        assert r.status_code == 200
+        assert r.json()["email"] == email
+        # login
+        r2 = requests.post(f"{API}/auth/login", json={"email": email, "password": "Hemligt1!"})
+        assert r2.status_code == 200
+
+
+# --- Users / positions / rules / leaderboard -------------------------------
+class TestReads:
+    def test_users_list(self, admin_session):
+        r = admin_session.get(f"{API}/users")
+        assert r.status_code == 200
+        users = r.json()
+        emails = [u["email"] for u in users]
+        for p in PLAYERS:
+            assert p in emails, f"Seeded player missing: {p}"
+        assert ADMIN_EMAIL in emails
+
+    def test_positions_seeded(self, admin_session):
+        r = admin_session.get(f"{API}/positions")
+        assert r.status_code == 200
+        assert len(r.json()) >= 5
+
+    def test_rules_seeded(self, admin_session):
+        r = admin_session.get(f"{API}/rules")
+        assert r.status_code == 200
+        rules = r.json()
+        base = [x for x in rules if x.get("is_base")]
+        assert len(base) >= 3
+
+    def test_leaderboard(self, admin_session):
+        r = admin_session.get(f"{API}/leaderboard")
+        assert r.status_code == 200
+        assert isinstance(r.json(), list)
+
+    def test_patch_notes(self, admin_session):
+        r = admin_session.get(f"{API}/patch-notes")
+        assert r.status_code == 200
+        assert len(r.json()) >= 2
+
+
+# --- Match creation validation --------------------------------------------
+class TestMatches:
+    def _pick_players(self, sess, n):
+        users = sess.get(f"{API}/users").json()
+        ids = [u["id"] for u in users if u["email"] in PLAYERS][:n]
+        return ids
+
+    def test_matches_list(self, admin_session):
+        r = admin_session.get(f"{API}/matches")
+        assert r.status_code == 200
+        assert isinstance(r.json(), list)
+
+    def test_create_match_too_few(self, admin_session):
+        ids = self._pick_players(admin_session, 2)
+        parts = [{"user_id": ids[0], "placement": 1}, {"user_id": ids[1], "placement": 2}]
+        r = admin_session.post(f"{API}/matches", json={"participants": parts, "rule_ids": []})
+        assert r.status_code == 400
+        assert "3" in r.json()["detail"]
+
+    def test_create_match_duplicate_placement(self, admin_session):
+        ids = self._pick_players(admin_session, 3)
+        parts = [{"user_id": ids[0], "placement": 1},
+                 {"user_id": ids[1], "placement": 1},
+                 {"user_id": ids[2], "placement": 2}]
+        r = admin_session.post(f"{API}/matches", json={"participants": parts, "rule_ids": []})
+        assert r.status_code == 400
+        assert "unika" in r.json()["detail"].lower()
+
+    def test_create_match_and_comment(self, admin_session):
+        ids = self._pick_players(admin_session, 3)
+        parts = [{"user_id": ids[i], "placement": i + 1, "table_position": "Dealer"} for i in range(3)]
+        r = admin_session.post(f"{API}/matches", json={"participants": parts, "rule_ids": []})
+        assert r.status_code == 200, r.text
+        m = r.json()
+        assert m["player_count"] == 3
+        assert m["winner_name"]
+        # participant should have elo fields
+        parts_out = m["participants"]
+        assert all("elo_before" in p and "elo_after" in p and "elo_delta" in p for p in parts_out)
+        # winner gets positive delta, last gets negative
+        winner = next(p for p in parts_out if p["placement"] == 1)
+        last = next(p for p in parts_out if p["placement"] == 3)
+        assert winner["elo_delta"] > 0
+        assert last["elo_delta"] < 0
+
+        match_id = m["id"]
+        # comment
+        rc = admin_session.post(f"{API}/matches/{match_id}/comments", json={"text": "Bra match!"})
+        assert rc.status_code == 200
+        assert rc.json()["text"] == "Bra match!"
+        # emoji comment
+        re_ = admin_session.post(f"{API}/matches/{match_id}/comments", json={"emoji": "🔥"})
+        assert re_.status_code == 200
+        # list
+        rl = admin_session.get(f"{API}/matches/{match_id}/comments")
+        assert rl.status_code == 200
+        assert len(rl.json()) >= 2
+        # empty comment
+        rr = admin_session.post(f"{API}/matches/{match_id}/comments", json={"text": "  "})
+        assert rr.status_code == 400
+
+    def test_match_detail_has_rules(self, admin_session):
+        rules = admin_session.get(f"{API}/rules").json()
+        rule_id = rules[0]["id"]
+        ids = self._pick_players(admin_session, 3)
+        parts = [{"user_id": ids[i], "placement": i + 1} for i in range(3)]
+        r = admin_session.post(f"{API}/matches", json={"participants": parts, "rule_ids": [rule_id]})
+        assert r.status_code == 200
+        mid = r.json()["id"]
+        detail = admin_session.get(f"{API}/matches/{mid}")
+        assert detail.status_code == 200
+        assert any(x["id"] == rule_id for x in detail.json()["rules"])
+
+
+# --- Rules CRUD -----------------------------------------------------------
+class TestRulesCRUD:
+    def test_create_and_delete_rule(self, admin_session):
+        r = admin_session.post(f"{API}/rules", json={"name": f"TEST_{uuid.uuid4().hex[:6]}", "description": "t", "icon": "Dices"})
+        assert r.status_code == 200
+        rid = r.json()["id"]
+        d = admin_session.delete(f"{API}/rules/{rid}")
+        assert d.status_code == 200
+
+    def test_cannot_delete_others_rule(self):
+        # Login as erik and try to delete an admin-seeded rule
+        s = requests.Session()
+        s.post(f"{API}/auth/login", json={"email": "erik@test.se", "password": PLAYER_PW})
+        rules = s.get(f"{API}/rules").json()
+        base = next(x for x in rules if x.get("is_base"))
+        r = s.delete(f"{API}/rules/{base['id']}")
+        assert r.status_code == 403
+
+
+# --- Patch notes ----------------------------------------------------------
+class TestPatchNotes:
+    def test_add_patch_note(self, admin_session):
+        r = admin_session.post(f"{API}/patch-notes", json={"title": "TEST", "description": "d"})
+        assert r.status_code == 200
+        assert r.json()["author_name"]

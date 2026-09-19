@@ -35,7 +35,7 @@ export default function MatchDetail() {
     api.get(`/matches/${id}`).then((r) => setMatch(r.data)).catch((e) => toast.error(formatError(e.response?.data?.detail)));
     api.get(`/matches/${id}/comments`).then((r) => setComments(r.data)).catch(() => {});
   };
-  useEffect(load, [id]);
+  useEffect(() => { load(); }, [id]);
 
   const sendComment = async (emoji) => {
     const payload = emoji ? { emoji } : { text: text.trim() };
