@@ -1,0 +1,100 @@
+{
+  "project_title": "Kortspels-app med Elo & Statistik",
+  "archetype": "ELECTRIC & NEON / GAMING DARK MODE",
+  "language": "sv-SE (Svenska genomgående)",
+  "context": "Mobile-first Web App (Sluten kortspelsgrupp)",
+  "theme": {
+    "mode": "dark",
+    "background": "#090B10",
+    "surface": "#121620",
+    "surface_elevated": "#1A202C",
+    "surface_glass": "rgba(22, 28, 42, 0.75)",
+    "border": "#2A3447",
+    "border_glow": "rgba(56, 189, 248, 0.3)",
+    "text_primary": "#F8FAFC",
+    "text_secondary": "#94A3B8",
+    "text_muted": "#64748B"
+  },
+  "colors": {
+    "primary": "#38BDF8",
+    "primary_glow": "#0EA5E9",
+    "accent_purple": "#A855F7",
+    "accent_gold": "#F59E0B",
+    "elo_up": "#10B981",
+    "elo_up_bg": "rgba(16, 185, 129, 0.15)",
+    "elo_down": "#EF4444",
+    "elo_down_bg": "rgba(239, 68, 68, 0.15)",
+    "ranking_gold": "#F59E0B",
+    "ranking_silver": "#94A3B8",
+    "ranking_bronze": "#D97706"
+  },
+  "typography": {
+    "heading_font": "Outfit, sans-serif",
+    "body_font": "Inter, sans-serif",
+    "mono_font": "JetBrains Mono, monospace",
+    "h1": "text-2xl sm:text-3xl font-bold tracking-tight text-slate-50",
+    "h2": "text-xl sm:text-2xl font-bold tracking-tight text-slate-100",
+    "h3": "text-lg font-semibold text-slate-200",
+    "caption": "text-xs font-mono tracking-wider uppercase text-slate-400"
+  },
+  "spacing_and_layout": {
+    "philosophy": "Generous spacing, thumb-friendly touch targets (minimum 44x44px), mobile-first viewport container (max-w-md mx-auto on desktop for crisp mobile app feel)",
+    "bottom_nav_height": "h-16 (64px)",
+    "container_padding": "px-4 py-4 pb-24",
+    "grid_worms_picker": "grid grid-cols-4 sm:grid-cols-5 gap-2.5 p-3 bg-slate-900/90 rounded-xl border border-slate-800"
+  },
+  "components_and_features": {
+    "bottom_nav": {
+      "tabs": [
+        {"id": "new-match", "label": "Ny match", "icon": "PlusCircle"},
+        {"id": "history", "label": "Historik", "icon": "History"},
+        {"id": "leaderboard", "label": "Topplista", "icon": "Trophy"},
+        {"id": "rules", "label": "Regler", "icon": "BookOpen"},
+        {"id": "patch-notes", "label": "Patch-notes", "icon": "Sparkles"}
+      ],
+      "style": "fixed bottom-0 left-0 right-0 z-50 bg-slate-950/90 backdrop-blur-xl border-t border-slate-800 px-2 py-2 flex justify-around items-center max-w-md mx-auto"
+    },
+    "worms_rule_picker": {
+      "concept": "Gamla Worms vapenval - visuellt rutnät av regel-ikoner med tap-to-toggle och retro neonglöd",
+      "style": "aspect-square flex flex-col items-center justify-center p-2 rounded-lg border text-center transition-all cursor-pointer min-h-[54px]",
+      "active_state": "bg-sky-500/20 border-sky-400 text-sky-300 shadow-[0_0_12px_rgba(56,189,248,0.4)] scale-95",
+      "inactive_state": "bg-slate-800/60 border-slate-700/60 text-slate-400 hover:bg-slate-800 hover:border-slate-600"
+    },
+    "elo_badge": {
+      "positive": "inline-flex items-center gap-1 px-2.5 py-1 rounded-full text-xs font-mono font-bold bg-emerald-500/15 text-emerald-400 border border-emerald-500/30",
+      "negative": "inline-flex items-center gap-1 px-2.5 py-1 rounded-full text-xs font-mono font-bold bg-rose-500/15 text-rose-400 border border-rose-500/30"
+    },
+    "shittalk_feed": {
+      "description": "Kommentarsfält med snabbval för emojis (🔥, 💩, 🤡, 👑, 🎯, 🚀, 😭) + textkommentarer med spelar-avatar",
+      "card_style": "p-3 rounded-xl bg-slate-900/60 border border-slate-800 text-sm space-y-1.5"
+    },
+    "auth_screen": {
+      "features": "E-post & Lösenord inloggning / registrering + Google login mockup knapp",
+      "style": "min-h-screen flex flex-col justify-center px-6 py-12 bg-slate-950 text-slate-100"
+    }
+  },
+  "motion": {
+    "library": "framer-motion",
+    "tab_transition": "animate with subtle fade and slide-up",
+    "elo_counter": "animated counting up/down when match is saved",
+    "rule_toggle": "spring physics scale effect on tap"
+  },
+  "testing_and_accessibility": {
+    "data_testid_rule": "ALL interactive components MUST include a unique data-testid in kebab-case, e.g. data-testid='new-match-submit-button', data-testid='rule-toggle-kortbyte', data-testid='tab-leaderboard'",
+    "touch_targets": "Minimum 44x44px target area for mobile thumbs"
+  },
+  "instructions_to_main_agent": [
+    "Use Swedish text throughout all screens without exception.",
+    "Implement full mock backend storage (localStorage / state) with pre-populated realistic Swedish players, match history, rules, and patch notes.",
+    "Ensure bottom navigation bar is sticky, thumb-friendly, and contains all 5 tabs: Ny match, Historik, Topplista, Regler, Patch-notes.",
+    "Worms rule picker grid in 'Ny match' flow must feature grid of rule icons with instant tap-to-toggle visuals, description tooltips/modals, and custom rule inline modal.",
+    "Elo calculation should dynamically adjust player ratings based on 3-6 player placements, displaying immediate '+18' / '-12' badges upon submitting.",
+    "Every card, button, tab, and form control MUST include descriptive data-testid attributes."
+  ],
+  "UNIVERSAL GUIDELINES FOR MAIN AGENT": [
+    "Do not use transparent background on dropdowns or overlays.",
+    "Maintain contrast standards (minimum 4.5:1 for body text).",
+    "Do not center-align body text globally.",
+    "Keep mobile container max-w-md centered on desktop for realistic mobile app preview."
+  ]
+}

@@ -1,0 +1,54 @@
+@import url('https://fonts.googleapis.com/css2?family=Outfit:wght@400;500;600;700;800&family=Inter:wght@400;500;600;700&family=JetBrains+Mono:wght@500;600;700&display=swap');
+
+@tailwind base;
+@tailwind components;
+@tailwind utilities;
+
+:root {
+  --bg: #090B10;
+  --surface: #121620;
+  --surface-2: #1A202C;
+  --border: #2A3447;
+  --primary: #38BDF8;
+  --up: #10B981;
+  --down: #EF4444;
+}
+
+* { -webkit-tap-highlight-color: transparent; }
+
+html, body {
+  margin: 0;
+  background: var(--bg);
+  color: #F8FAFC;
+  font-family: 'Inter', sans-serif;
+  -webkit-font-smoothing: antialiased;
+  overscroll-behavior-y: none;
+}
+
+h1, h2, h3, .font-display { font-family: 'Outfit', sans-serif; }
+.font-mono { font-family: 'JetBrains Mono', monospace; }
+
+/* Input font-size >=16px to avoid iOS zoom */
+input, select, textarea, button { font-size: 16px; }
+
+::-webkit-scrollbar { width: 0; height: 0; }
+
+::selection { background: rgba(56,189,248,0.3); color: #F8FAFC; }
+
+@layer base {
+  * { border-color: var(--border); }
+}
+
+.glass {
+  background: rgba(22, 28, 42, 0.75);
+  backdrop-filter: blur(16px);
+  -webkit-backdrop-filter: blur(16px);
+}
+
+.glow-primary { box-shadow: 0 0 20px rgba(56,189,248,0.25); }
+
+@keyframes pop-in {
+  0% { transform: scale(0.8); opacity: 0; }
+  100% { transform: scale(1); opacity: 1; }
+}
+.animate-pop { animation: pop-in 0.3s cubic-bezier(0.34,1.56,0.64,1); }
