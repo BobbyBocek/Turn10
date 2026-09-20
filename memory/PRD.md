@@ -23,16 +23,19 @@ guld (#F59E0B) + crimson (#E11D48) accenter.
 
 ## Implementerat (2026-06)
 - v1 (Kortkväll): auth, ny match, historik, matchdetalj, topplista, regler, patch notes, Elo + streaks.
-- v2 (Turn10-rebrand): rebrand + logo; profiler (smeknamn + avatar bg/symbol); utgångsbonus;
-  PlayingCard-komponent + exit-card picker; Home-dashboard; RoundTable på Ny match; card-shaped regelväljare;
-  topplista-badges (🔥💬🥄👕🏆) + Månadens spelare + historik; V-ringad månadsomröstning; Spela igen; Min sida.
-- Seed: admin Tommy + 5 spelare med smeknamn/ikoner, Turn10-regler (7 grund + 4 tillval), 4 exempelmatcher.
-- Testat: backend 25/25 pytest, frontend 16/16 flöden (iteration_2, inga buggar).
+- v2 (Turn10-rebrand): rebrand + logo; profiler (smeknamn + avatar); utgångsbonus; PlayingCard + exit-card picker;
+  Home-dashboard; RoundTable; card-shaped regelväljare; topplista-badges + Månadens spelare + historik; V-ringad-omröstning; Spela igen; Min sida.
+- v3 (åtkomst + regelverktyg): bordsposition tilldelas i steg 1 via tryck på bordet (position-sheet); publik läsvy
+  utan inloggning (Topplista/Regler/Historik/matchdetalj), övrigt kräver login; 6-siffrig inbjudningskod (env INVITE_CODE=267710)
+  vid registrering; regelkategorier (Begränsning/Fördel/Special, färgkodade) + skapare + användningsräknare + sorterbart;
+  ny badge 📖 flest skapade regler; sökbar Lucide-ikonväljare med snabbrad kortsymboler; "Rensa testdata"-knapp (POST /admin/clear-testdata + recompute_all);
+  inga exempelregler seedas längre.
+- Testat: backend 40/40 pytest, frontend 100% (iteration_3), inga defekter.
 
 ## Backlog (ej gjort)
 - P1: Elo-graf per spelare över tid (recharts).
-- P2: Redigera/ta bort match + rulla tillbaka Elo; auto-popup av röstning 1:a i månaden; egna bordspositioner-UI.
-- P2: Bildavatar-uppladdning (object storage).
+- P2: Drag-and-drop av spelare mellan bordsplatser (nu tap-to-assign); auto-popup röstning 1:a i månaden; redigera/ta bort match.
+- P2: Bildavatar-uppladdning (object storage); admin-vy för att rensa enskilda konton.
 
 ## Nästa steg
 Se Next Action Items i finish-summary.

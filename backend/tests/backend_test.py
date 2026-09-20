@@ -46,15 +46,26 @@ class TestAuth:
         assert r.json()["email"] == ADMIN_EMAIL
 
     def test_register_duplicate(self):
-        r = requests.post(f"{API}/auth/register", json={"name": "X", "email": ADMIN_EMAIL, "password": "x"})
+        r = requests.post(f"{API}/auth/register", json={"name": "X", "email": ADMIN_EMAIL, "password": "x", "invite_code": "267710"})
         assert r.status_code == 400
+
+    def test_register_wrong_invite_code(self):
+        email = f"test_{uuid.uuid4().hex[:8]}@test.se"
+        r = requests.post(f"{API}/auth/register", json={"name": "Ny", "email": email, "password": "Hemligt1!", "invite_code": "000000"})
+        assert r.status_code == 403
+        assert "Ogiltig" in r.json().get("detail", "")
+
+    def test_register_missing_invite_code(self):
+        email = f"test_{uuid.uuid4().hex[:8]}@test.se"
+        r = requests.post(f"{API}/auth/register", json={"name": "Ny", "email": email, "password": "Hemligt1!"})
+        assert r.status_code == 422
 
     def test_register_new_and_login(self):
         email = f"test_{uuid.uuid4().hex[:8]}@test.se"
-        r = requests.post(f"{API}/auth/register", json={"name": "Ny", "email": email, "password": "Hemligt1!"})
-        assert r.status_code == 200
+        r = requests.post(f"{API}/auth/register", json={"name": "Ny", "email": email, "password": "Hemligt1!", "invite_code": "267710"})
+        assert r.status_code == 200, r.text
         assert r.json()["email"] == email
-        # login
+        # login (no invite needed for login)
         r2 = requests.post(f"{API}/auth/login", json={"email": email, "password": "Hemligt1!"})
         assert r2.status_code == 200
 
@@ -75,12 +86,10 @@ class TestReads:
         assert r.status_code == 200
         assert len(r.json()) >= 5
 
-    def test_rules_seeded(self, admin_session):
+    def test_rules_endpoint(self, admin_session):
         r = admin_session.get(f"{API}/rules")
         assert r.status_code == 200
-        rules = r.json()
-        base = [x for x in rules if x.get("is_base")]
-        assert len(base) >= 3
+        assert isinstance(r.json(), list)  # iter3: seeded rule library intentionally empty
 
     def test_leaderboard(self, admin_session):
         r = admin_session.get(f"{API}/leaderboard")
@@ -156,8 +165,10 @@ class TestMatches:
         assert rr.status_code == 400
 
     def test_match_detail_has_rules(self, admin_session):
-        rules = admin_session.get(f"{API}/rules").json()
-        rule_id = rules[0]["id"]
+        # iter3: no seeded rules; create one, then use it in a match
+        cr = admin_session.post(f"{API}/rules", json={"name": f"TEST_{uuid.uuid4().hex[:6]}", "description": "t", "icon": "Dices", "category": "special"})
+        assert cr.status_code == 200
+        rule_id = cr.json()["id"]
         ids = self._pick_players(admin_session, 3)
         parts = [{"user_id": ids[i], "placement": i + 1} for i in range(3)]
         r = admin_session.post(f"{API}/matches", json={"participants": parts, "rule_ids": [rule_id]})
@@ -177,14 +188,17 @@ class TestRulesCRUD:
         d = admin_session.delete(f"{API}/rules/{rid}")
         assert d.status_code == 200
 
-    def test_cannot_delete_others_rule(self):
-        # Login as erik and try to delete an admin-seeded rule
+    def test_cannot_delete_others_rule(self, admin_session):
+        # Admin creates a rule; erik tries to delete it -> 403
+        cr = admin_session.post(f"{API}/rules", json={"name": f"TEST_{uuid.uuid4().hex[:6]}", "description": "t", "icon": "Dices"})
+        assert cr.status_code == 200
+        rid = cr.json()["id"]
         s = requests.Session()
         s.post(f"{API}/auth/login", json={"email": "erik@test.se", "password": PLAYER_PW})
-        rules = s.get(f"{API}/rules").json()
-        base = next(x for x in rules if x.get("is_base"))
-        r = s.delete(f"{API}/rules/{base['id']}")
+        r = s.delete(f"{API}/rules/{rid}")
         assert r.status_code == 403
+        # cleanup by admin
+        admin_session.delete(f"{API}/rules/{rid}")
 
 
 # --- Patch notes ----------------------------------------------------------
@@ -282,3 +296,121 @@ class TestTurn10:
         assert pmap[ids[0]]["utgangs_bonus"] == 4  # round((15-5)*0.4)=4
         assert pmap[ids[1]]["utgangs_bonus"] == 0
         assert pmap[ids[2]]["utgangs_bonus"] == 3  # round((15-8)*0.4)=round(2.8)=3
+
+
+# --- Iteration 3: public read-only access + rule metadata -----------------
+class TestPublicAccess:
+    """GETs that should work WITHOUT auth (iteration 3)."""
+
+    def test_public_leaderboard(self):
+        r = requests.get(f"{API}/leaderboard")
+        assert r.status_code == 200
+        d = r.json()
+        assert "rows" in d and "badges" in d
+        # most_rules badge must exist
+        assert "most_rules" in d["badges"]
+
+    def test_public_rules(self):
+        r = requests.get(f"{API}/rules")
+        assert r.status_code == 200
+        rules = r.json()
+        assert isinstance(rules, list)
+        # If any rule exists, verify iteration-3 fields present
+        for x in rules:
+            assert "category" in x
+            assert "creator_name" in x  # may be None
+            assert "usage_count" in x
+
+    def test_public_matches(self):
+        r = requests.get(f"{API}/matches")
+        assert r.status_code == 200
+        assert isinstance(r.json(), list)
+
+    def test_public_match_detail(self, admin_session):
+        matches = admin_session.get(f"{API}/matches").json()
+        if not matches:
+            pytest.skip("no matches to fetch")
+        mid = matches[0]["id"]
+        r = requests.get(f"{API}/matches/{mid}")
+        assert r.status_code == 200
+        assert r.json()["id"] == mid
+
+    def test_public_awards_history(self):
+        r = requests.get(f"{API}/awards/history")
+        assert r.status_code == 200
+        assert isinstance(r.json(), list)
+
+    def test_public_vote_status(self):
+        r = requests.get(f"{API}/vote/status")
+        assert r.status_code == 200
+        d = r.json()
+        assert "voted" in d and "month" in d
+
+
+class TestAuthRequired:
+    """Writes that must still require auth."""
+
+    def test_create_rule_requires_auth(self):
+        r = requests.post(f"{API}/rules", json={"name": "TEST_x", "description": "d"})
+        assert r.status_code == 401
+
+    def test_create_match_requires_auth(self):
+        r = requests.post(f"{API}/matches", json={"participants": [], "rule_ids": []})
+        assert r.status_code == 401
+
+    def test_comment_requires_auth(self, admin_session):
+        matches = admin_session.get(f"{API}/matches").json()
+        if not matches:
+            pytest.skip("no matches")
+        mid = matches[0]["id"]
+        r = requests.post(f"{API}/matches/{mid}/comments", json={"text": "hi"})
+        assert r.status_code == 401
+
+    def test_vote_requires_auth(self):
+        r = requests.post(f"{API}/vote", json={"voted_for": "abc"})
+        assert r.status_code == 401
+
+    def test_profile_requires_auth(self):
+        r = requests.put(f"{API}/profile", json={"nickname": "x"})
+        assert r.status_code == 401
+
+
+class TestRuleMetadata:
+    """Iteration 3: rules with category + creator + usage_count."""
+
+    def test_create_rule_with_category(self, admin_session):
+        name = f"TEST_{uuid.uuid4().hex[:6]}"
+        r = admin_session.post(f"{API}/rules", json={
+            "name": name, "description": "cat test", "icon": "Spade", "category": "begransning"
+        })
+        assert r.status_code == 200
+        d = r.json()
+        assert d["category"] == "begransning"
+        assert d["creator_name"]  # Tommy / Tom
+        assert d["usage_count"] == 0
+        rid = d["id"]
+        # Now list should show it
+        listed = admin_session.get(f"{API}/rules").json()
+        found = next(x for x in listed if x["id"] == rid)
+        assert found["category"] == "begransning"
+        assert "creator_name" in found and "usage_count" in found
+        # Use it in a match -> usage_count should be >=1 after
+        users = admin_session.get(f"{API}/users").json()
+        ids = [u["id"] for u in users if u["email"] in PLAYERS][:3]
+        parts = [{"user_id": ids[i], "placement": i + 1} for i in range(3)]
+        m = admin_session.post(f"{API}/matches", json={"participants": parts, "rule_ids": [rid]})
+        assert m.status_code == 200
+        listed2 = admin_session.get(f"{API}/rules").json()
+        found2 = next(x for x in listed2 if x["id"] == rid)
+        assert found2["usage_count"] >= 1
+        # cleanup
+        admin_session.delete(f"{API}/rules/{rid}")
+
+
+class TestClearTestdata:
+    """Endpoint exists and requires auth. DO NOT invoke it to actually clear data."""
+
+    def test_clear_testdata_requires_auth(self):
+        r = requests.post(f"{API}/admin/clear-testdata")
+        # Either 401 (unauth) or 403 (non-admin). Must not be 200.
+        assert r.status_code in (401, 403)
