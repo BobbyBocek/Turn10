@@ -5,7 +5,7 @@ import api, { formatError } from "../api";
 import Header from "../components/Header";
 import PlayerAvatar from "../components/PlayerAvatar";
 import { toast } from "sonner";
-import { LogOut, Sparkles, Check, Loader2, ChevronRight } from "lucide-react";
+import { LogOut, Sparkles, Check, Loader2, ChevronRight, Trash2 } from "lucide-react";
 
 const BG_COLORS = ["#E11D48", "#F59E0B", "#10B981", "#38BDF8", "#A855F7", "#EC4899", "#F97316", "#334155"];
 const SYMBOLS = ["♠", "♥", "♦", "♣", "★", "♛", "⚡", "🔥"];
@@ -17,6 +17,7 @@ export default function Profile() {
   const [bg, setBg] = useState(user?.icon?.bg || "#334155");
   const [symbol, setSymbol] = useState(user?.icon?.symbol || (user?.name || "?")[0]?.toUpperCase());
   const [saving, setSaving] = useState(false);
+  const [clearing, setClearing] = useState(false);
 
   const save = async () => {
     setSaving(true);
@@ -26,6 +27,16 @@ export default function Profile() {
       toast.success("Profil sparad");
     } catch (e) { toast.error(formatError(e.response?.data?.detail)); }
     finally { setSaving(false); }
+  };
+
+  const clearTestData = async () => {
+    if (!window.confirm("Radera alla testspelare (Kungen, Jocke, Ankan, SaSa, Lisen) och deras matcher? Detta går inte att ångra.")) return;
+    setClearing(true);
+    try {
+      const { data } = await api.post("/admin/clear-testdata");
+      toast.success(`Rensade ${data.removed_players} testspelare och ${data.removed_matches} matcher`);
+    } catch (e) { toast.error(formatError(e.response?.data?.detail)); }
+    finally { setClearing(false); }
   };
 
   return (
@@ -87,6 +98,11 @@ export default function Profile() {
             className="w-full flex items-center gap-3 p-3.5 rounded-xl bg-slate-900/60 border border-slate-800 active:bg-slate-800 text-rose-400">
             <LogOut className="w-5 h-5" />
             <span className="flex-1 text-left font-medium">Logga ut</span>
+          </button>
+          <button data-testid="clear-testdata-button" onClick={clearTestData} disabled={clearing}
+            className="w-full flex items-center gap-3 p-3.5 rounded-xl bg-rose-950/40 border border-rose-900/50 active:bg-rose-950/60 text-rose-300 disabled:opacity-60">
+            {clearing ? <Loader2 className="w-5 h-5 animate-spin" /> : <Trash2 className="w-5 h-5" />}
+            <span className="flex-1 text-left font-medium">Rensa testdata (testspelare & deras matcher)</span>
           </button>
         </div>
       </div>

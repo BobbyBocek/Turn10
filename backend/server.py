@@ -20,7 +20,7 @@ import httpx
 
 import elo
 
-SEED_VERSION = "turn10-v4"
+SEED_VERSION = "turn10-v5"
 
 mongo_url = os.environ['MONGO_URL']
 client = AsyncIOMotorClient(mongo_url)
@@ -28,6 +28,7 @@ db = client[os.environ['DB_NAME']]
 
 JWT_SECRET = os.environ['JWT_SECRET']
 JWT_ALG = "HS256"
+INVITE_CODE = os.environ.get("INVITE_CODE", "267710")
 EMERGENT_SESSION_URL = "https://demobackend.emergentagent.com/auth/v1/env/oauth/session-data"
 
 app = FastAPI()
@@ -134,6 +135,13 @@ async def get_current_user(request: Request) -> dict:
     return await resolve_user(request)
 
 
+async def optional_user(request: Request):
+    try:
+        return await resolve_user(request)
+    except HTTPException:
+        return None
+
+
 async def users_map():
     return {u["id"]: u for u in await db.users.find({}, {"_id": 0}).to_list(1000)}
 
@@ -143,6 +151,7 @@ class RegisterInput(BaseModel):
     name: str
     email: EmailStr
     password: str
+    invite_code: str
 
 
 class LoginInput(BaseModel):
@@ -160,6 +169,7 @@ class RuleInput(BaseModel):
     description: Optional[str] = ""
     icon: Optional[str] = "Dices"
     is_base: bool = False
+    category: Optional[str] = "special"
 
 
 class ParticipantInput(BaseModel):
@@ -197,6 +207,8 @@ class VoteInput(BaseModel):
 # --- Auth ------------------------------------------------------------------
 @api.post("/auth/register")
 async def register(data: RegisterInput, response: Response):
+    if data.invite_code.strip() != INVITE_CODE:
+        raise HTTPException(status_code=403, detail="Ogiltig inbjudningskod")
     email = data.email.lower()
     if await db.users.find_one({"email": email}):
         raise HTTPException(status_code=400, detail="E-postadressen är redan registrerad")
@@ -286,7 +298,7 @@ async def update_profile(data: ProfileInput, user: dict = Depends(get_current_us
 
 # --- Users -----------------------------------------------------------------
 @api.get("/users")
-async def list_users(user: dict = Depends(get_current_user)):
+async def list_users(user=Depends(optional_user)):
     users = await db.users.find({}, {"_id": 0}).to_list(1000)
     return [public_user(u) for u in users]
 
@@ -307,20 +319,33 @@ async def add_position(data: PositionInput, user: dict = Depends(get_current_use
 
 # --- Rules -----------------------------------------------------------------
 @api.get("/rules")
-async def list_rules(user: dict = Depends(get_current_user)):
-    return await db.rules.find({}, {"_id": 0}).to_list(1000)
+async def list_rules(user=Depends(optional_user)):
+    docs = await db.rules.find({}, {"_id": 0}).to_list(1000)
+    umap = await users_map()
+    usage = defaultdict(int)
+    for m in await db.matches.find({}, {"_id": 0, "rule_ids": 1}).to_list(2000):
+        for rid in m.get("rule_ids", []):
+            usage[rid] += 1
+    for d in docs:
+        creator = umap.get(d.get("created_by"))
+        d["creator_name"] = (creator.get("nickname") or creator.get("name")) if creator else None
+        d["creator_icon"] = (creator.get("icon") or default_icon(creator.get("name"))) if creator else None
+        d["usage_count"] = usage.get(d["id"], 0)
+        d.setdefault("category", "special")
+    return docs
 
 
 @api.post("/rules")
 async def create_rule(data: RuleInput, user: dict = Depends(get_current_user)):
     doc = {
         "id": str(uuid.uuid4()), "name": data.name.strip(), "description": data.description or "",
-        "icon": data.icon or "Dices", "is_base": data.is_base, "created_by": user["id"],
-        "created_at": now_iso(),
+        "icon": data.icon or "Dices", "is_base": data.is_base, "category": data.category or "special",
+        "created_by": user["id"], "created_at": now_iso(),
     }
     await db.rules.insert_one(doc)
     doc.pop("_id", None)
-    return doc
+    return {**doc, "creator_name": user.get("nickname") or user["name"],
+            "creator_icon": user.get("icon") or default_icon(user["name"]), "usage_count": 0}
 
 
 @api.put("/rules/{rule_id}")
@@ -332,7 +357,7 @@ async def update_rule(rule_id: str, data: RuleInput, user: dict = Depends(get_cu
         raise HTTPException(status_code=403, detail="Du kan bara redigera regler du själv skapat")
     await db.rules.update_one({"id": rule_id}, {"$set": {
         "name": data.name.strip(), "description": data.description or "",
-        "icon": data.icon or "Dices", "is_base": data.is_base}})
+        "icon": data.icon or "Dices", "is_base": data.is_base, "category": data.category or "special"}})
     return await db.rules.find_one({"id": rule_id}, {"_id": 0})
 
 
@@ -435,14 +460,14 @@ async def create_match(data: MatchInput, user: dict = Depends(get_current_user))
 
 
 @api.get("/matches")
-async def list_matches(user: dict = Depends(get_current_user)):
+async def list_matches(user=Depends(optional_user)):
     docs = await db.matches.find({}, {"_id": 0}).sort("date", -1).to_list(1000)
     umap = await users_map()
     return [await build_match_summary(m, umap) for m in docs]
 
 
 @api.get("/matches/{match_id}")
-async def get_match(match_id: str, user: dict = Depends(get_current_user)):
+async def get_match(match_id: str, user=Depends(optional_user)):
     m = await db.matches.find_one({"id": match_id}, {"_id": 0})
     if not m:
         raise HTTPException(status_code=404, detail="Matchen hittades inte")
@@ -453,7 +478,7 @@ async def get_match(match_id: str, user: dict = Depends(get_current_user)):
 
 # --- Comments --------------------------------------------------------------
 @api.get("/matches/{match_id}/comments")
-async def list_comments(match_id: str, user: dict = Depends(get_current_user)):
+async def list_comments(match_id: str, user=Depends(optional_user)):
     docs = await db.comments.find({"match_id": match_id}, {"_id": 0}).sort("created_at", 1).to_list(1000)
     umap = await users_map()
     for c in docs:
@@ -526,13 +551,17 @@ def prev_month(month: str) -> str:
 
 # --- Leaderboard -----------------------------------------------------------
 @api.get("/leaderboard")
-async def leaderboard(user: dict = Depends(get_current_user)):
+async def leaderboard(user=Depends(optional_user)):
     umap = await users_map()
     played = [u for u in umap.values() if u.get("matches_played", 0) >= 1]
 
     comment_counts = defaultdict(int)
     for c in await db.comments.find({}, {"_id": 0, "user_id": 1}).to_list(5000):
         comment_counts[c["user_id"]] += 1
+
+    rule_counts = defaultdict(int)
+    for r in await db.rules.find({}, {"_id": 0, "created_by": 1}).to_list(5000):
+        rule_counts[r.get("created_by")] += 1
 
     rows = []
     for u in played:
@@ -545,7 +574,7 @@ async def leaderboard(user: dict = Depends(get_current_user)):
             "last_places": u.get("last_places", 0), "matches_played": mp,
             "win_pct": round(100 * wins / mp) if mp else 0,
             "win_streak": u.get("win_streak", 0), "max_win_streak": u.get("max_win_streak", 0),
-            "comments": comment_counts.get(u["id"], 0),
+            "comments": comment_counts.get(u["id"], 0), "rules_created": rule_counts.get(u["id"], 0),
         })
     rows.sort(key=lambda r: r["rating"], reverse=True)
 
@@ -561,6 +590,7 @@ async def leaderboard(user: dict = Depends(get_current_user)):
         "win_streak": top("max_win_streak"),
         "most_comments": top("comments"),
         "most_losses": top("losses"),
+        "most_rules": top("rules_created"),
         "monthly_best": monthly_best["user_id"] if monthly_best else None,
         "v_ringad": v_ringad["user_id"] if v_ringad else None,
     }
@@ -568,7 +598,7 @@ async def leaderboard(user: dict = Depends(get_current_user)):
 
 
 @api.get("/awards/history")
-async def awards_history(user: dict = Depends(get_current_user)):
+async def awards_history(user=Depends(optional_user)):
     umap = await users_map()
     months = set()
     for m in await db.matches.find({}, {"_id": 0, "date": 1}).to_list(2000):
@@ -590,7 +620,7 @@ async def awards_history(user: dict = Depends(get_current_user)):
 
 # --- Voting ----------------------------------------------------------------
 @api.get("/vote/status")
-async def vote_status(user: dict = Depends(get_current_user)):
+async def vote_status(user=Depends(optional_user)):
     umap = await users_map()
     cm = current_month()
     votes = await db.monthly_votes.find({"month": cm}, {"_id": 0}).to_list(2000)
@@ -598,7 +628,7 @@ async def vote_status(user: dict = Depends(get_current_user)):
     my_vote = None
     for v in votes:
         tally[v["voted_for"]] += 1
-        if v["voter"] == user["id"]:
+        if user and v["voter"] == user["id"]:
             my_vote = v["voted_for"]
     tallies = [{"user_id": uid, "name": (umap.get(uid, {}).get("nickname") or umap.get(uid, {}).get("name")), "count": c}
                for uid, c in sorted(tally.items(), key=lambda x: -x[1])]
@@ -620,7 +650,7 @@ async def cast_vote(data: VoteInput, user: dict = Depends(get_current_user)):
 
 # --- Patch notes -----------------------------------------------------------
 @api.get("/patch-notes")
-async def list_patch_notes(user: dict = Depends(get_current_user)):
+async def list_patch_notes(user=Depends(optional_user)):
     docs = await db.patch_notes.find({}, {"_id": 0}).sort("created_at", -1).to_list(1000)
     umap = await users_map()
     for d in docs:
@@ -641,6 +671,66 @@ async def add_patch_note(data: PatchNoteInput, user: dict = Depends(get_current_
 @api.get("/")
 async def root():
     return {"message": "Turn10 API"}
+
+
+async def recompute_all():
+    """Nollställ och räkna om alla spelares statistik/Elo från kvarvarande matcher."""
+    await db.users.update_many({}, {"$set": {
+        "rating": elo.START_RATING, "matches_played": 0, "wins": 0, "losses": 0,
+        "last_places": 0, "win_streak": 0, "loss_streak": 0, "max_win_streak": 0}})
+    matches = await db.matches.find({}, {"_id": 0}).sort("date", 1).to_list(5000)
+    for m in matches:
+        parts = sorted(m["participants"], key=lambda p: p["placement"])
+        cur = {}
+        for p in parts:
+            cur[p["user_id"]] = await db.users.find_one({"id": p["user_id"]}, {"_id": 0})
+        elo_input = [{
+            "user_id": p["user_id"], "rating": cur[p["user_id"]].get("rating", elo.START_RATING),
+            "matches_played": cur[p["user_id"]].get("matches_played", 0),
+            "win_streak": cur[p["user_id"]].get("win_streak", 0),
+            "loss_streak": cur[p["user_id"]].get("loss_streak", 0),
+            "placement": p["placement"],
+        } for p in parts]
+        changes = {c["user_id"]: c for c in elo.compute_match_elo(elo_input)}
+        worst = len(parts)
+        new_parts = []
+        for p in parts:
+            c = changes[p["user_id"]]
+            bonus = elo.exit_bonus(p.get("exit_card_value"))
+            total = c["base_delta"] + bonus
+            after = c["elo_before"] + total
+            new_parts.append({**p, "elo_before": c["elo_before"], "elo_base_delta": c["base_delta"],
+                              "utgangs_bonus": bonus, "elo_delta": total, "elo_after": after})
+            u = cur[p["user_id"]]
+            is_win = p["placement"] == 1
+            is_last = p["placement"] == worst
+            await db.users.update_one({"id": p["user_id"]}, {"$set": {
+                "rating": after, "matches_played": u.get("matches_played", 0) + 1,
+                "wins": u.get("wins", 0) + (1 if is_win else 0),
+                "losses": u.get("losses", 0) + (0 if is_win else 1),
+                "last_places": u.get("last_places", 0) + (1 if is_last else 0),
+                "win_streak": c["new_win_streak"], "loss_streak": c["new_loss_streak"],
+                "max_win_streak": max(u.get("max_win_streak", 0), c["new_win_streak"])}})
+        await db.matches.update_one({"id": m["id"]}, {"$set": {"participants": new_parts}})
+
+
+@api.post("/admin/clear-testdata")
+async def clear_testdata(user: dict = Depends(get_current_user)):
+    """Radera testspelarna (erik/johan/anders/sara/lisa) + deras matcher/kommentarer och räkna om."""
+    test_emails = ["erik@test.se", "johan@test.se", "anders@test.se", "sara@test.se", "lisa@test.se"]
+    test_users = await db.users.find({"email": {"$in": test_emails}}, {"_id": 0}).to_list(100)
+    ids = [u["id"] for u in test_users]
+    if not ids:
+        return {"removed_players": 0, "removed_matches": 0}
+    matches = await db.matches.find({"participants.user_id": {"$in": ids}}, {"_id": 0, "id": 1}).to_list(5000)
+    match_ids = [m["id"] for m in matches]
+    await db.matches.delete_many({"id": {"$in": match_ids}})
+    await db.comments.delete_many({"match_id": {"$in": match_ids}})
+    await db.comments.delete_many({"user_id": {"$in": ids}})
+    await db.monthly_votes.delete_many({"$or": [{"voter": {"$in": ids}}, {"voted_for": {"$in": ids}}]})
+    await db.users.delete_many({"id": {"$in": ids}})
+    await recompute_all()
+    return {"removed_players": len(ids), "removed_matches": len(match_ids)}
 
 
 app.include_router(api)
@@ -711,31 +801,8 @@ async def seed():
     for i, name in enumerate(["Dealer", "Andra hand", "Mittemot", "Cutoff", "Hijack", "Sista hand"]):
         await db.positions.insert_one({"id": str(uuid.uuid4()), "name": name, "order": i})
 
-    base = [
-        ("Tvåan nollställer", "En 2:a nollställer högen – nästa spelare får lägga valfritt kort.", "RotateCcw"),
-        ("Tian vänder", "En 10:a vänder bort hela högen ur spel; den som lade tian lägger vidare på tomt.", "RefreshCw"),
-        ("Chansa", "Ta ett blint kort från draghögen istället för att plocka upp direkt.", "Dices"),
-        ("Fejka (bluff)", "Lägg ett kort dolt. Synas det och är ogiltigt får du plocka upp högen.", "EyeOff"),
-        ("Kasta in kort", "Har du samma valör får du kasta in det innan nästa hinner lägga.", "Send"),
-        ("Dubbel & trippel", "Lägg flera kort av samma valör som en läggning.", "Copy"),
-        ("Superregeln", "Allt kaos gäller tills nästa spelares kort ligger – då är läggningen låst.", "Lock"),
-    ]
-    optional = [
-        ("Tyst runda", "Ingen får prata under rundan.", "VolumeX"),
-        ("Snabbläggning", "Samma valör får läggas när som helst.", "Zap"),
-        ("Ingen chansning", "Chansa-alternativet är avstängt denna match.", "ShieldOff"),
-        ("Dubbel giv", "Alla får dubbelt så många kort på hand.", "Layers"),
-    ]
-    for name, desc, icon in base:
-        await db.rules.insert_one({"id": str(uuid.uuid4()), "name": name, "description": desc,
-                                   "icon": icon, "is_base": True, "created_by": admin["id"], "created_at": now_iso()})
-    for name, desc, icon in optional:
-        await db.rules.insert_one({"id": str(uuid.uuid4()), "name": name, "description": desc,
-                                   "icon": icon, "is_base": False, "created_by": admin["id"], "created_at": now_iso()})
+    # Inga exempelregler seedas – riktiga regler läggs till manuellt i appen.
 
-    rules = await db.rules.find({}, {"_id": 0}).to_list(100)
-    base_rule_ids = [r["id"] for r in rules if r["is_base"]]
-    extra_rule = next((r["id"] for r in rules if not r["is_base"]), None)
     players = await db.users.find({"email": {"$in": [e for _, e, _, _ in seed_players]}}, {"_id": 0}).to_list(100)
     pmap = {p["name"]: p["id"] for p in players}
     positions = ["Dealer", "Andra hand", "Mittemot", "Cutoff", "Hijack"]
@@ -752,8 +819,7 @@ async def seed():
             parts_in.append({"user_id": pmap[pname], "placement": idx + 1,
                              "table_position": positions[idx], "exit_card_value": cards[idx],
                              "exit_card_suit": suits[idx % 4]})
-        rid = base_rule_ids + ([extra_rule] if extra_rule else [])
-        await apply_match(parts_in, rid, admin["id"])
+        await apply_match(parts_in, [], admin["id"])
 
     notes = [
         ("Turn10 v1.0 – Lansering 🎴", "Ny app för vår vändtian! Konton, matcher, Elo, topplista, regler och shittalk."),

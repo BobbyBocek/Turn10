@@ -5,6 +5,7 @@ import Header from "../components/Header";
 import RuleIcon from "../components/RuleIcon";
 import PlayerAvatar from "../components/PlayerAvatar";
 import PlayingCard from "../components/PlayingCard";
+import { useAuth } from "../context/AuthContext";
 import { toast } from "sonner";
 import { motion } from "framer-motion";
 import { Crown, Send, Loader2, ArrowUp, ArrowDown, Minus, RotateCw } from "lucide-react";
@@ -25,6 +26,7 @@ function fmtDateTime(iso) {
 export default function MatchDetail() {
   const { id } = useParams();
   const navigate = useNavigate();
+  const { user } = useAuth();
   const [match, setMatch] = useState(null);
   const [comments, setComments] = useState([]);
   const [text, setText] = useState("");
@@ -57,7 +59,7 @@ export default function MatchDetail() {
   return (
     <div>
       <Header title="Matchdetaljer" subtitle={fmtDateTime(match.date)}
-        right={<button data-testid="play-again-button" onClick={playAgain} className="flex items-center gap-1 px-3 py-2 rounded-lg bg-amber-500 text-slate-950 text-xs font-bold active:scale-95 transition-transform"><RotateCw className="w-4 h-4" /> Spela igen</button>} />
+        right={user ? <button data-testid="play-again-button" onClick={playAgain} className="flex items-center gap-1 px-3 py-2 rounded-lg bg-amber-500 text-slate-950 text-xs font-bold active:scale-95 transition-transform"><RotateCw className="w-4 h-4" /> Spela igen</button> : undefined} />
       <div className="px-4 py-4 space-y-5">
         <div className="space-y-2">
           {match.participants.map((p, idx) => {
@@ -117,18 +119,24 @@ export default function MatchDetail() {
           </div>
 
           <div className="flex gap-1.5 mb-2 flex-wrap">
-            {QUICK_EMOJIS.map((e) => (
+            {user && QUICK_EMOJIS.map((e) => (
               <button key={e} data-testid={`emoji-${e}`} onClick={() => sendComment(e)} className="w-10 h-10 rounded-lg bg-slate-800 border border-slate-700 text-xl active:scale-90 transition-transform">{e}</button>
             ))}
           </div>
-          <div className="flex gap-2">
-            <input data-testid="comment-input" value={text} onChange={(e) => setText(e.target.value)} onKeyDown={(e) => e.key === "Enter" && sendComment()}
-              placeholder="Skriv en kommentar..." className="flex-1 px-4 py-3 rounded-xl bg-slate-900 border border-slate-700 focus:border-amber-500 outline-none text-sm" />
-            <button data-testid="send-comment-button" onClick={() => sendComment()} disabled={sending}
-              className="w-12 rounded-xl bg-amber-500 text-slate-950 flex items-center justify-center active:scale-95 transition-transform disabled:opacity-60">
-              {sending ? <Loader2 className="w-5 h-5 animate-spin" /> : <Send className="w-5 h-5" />}
+          {user ? (
+            <div className="flex gap-2">
+              <input data-testid="comment-input" value={text} onChange={(e) => setText(e.target.value)} onKeyDown={(e) => e.key === "Enter" && sendComment()}
+                placeholder="Skriv en kommentar..." className="flex-1 px-4 py-3 rounded-xl bg-slate-900 border border-slate-700 focus:border-amber-500 outline-none text-sm" />
+              <button data-testid="send-comment-button" onClick={() => sendComment()} disabled={sending}
+                className="w-12 rounded-xl bg-amber-500 text-slate-950 flex items-center justify-center active:scale-95 transition-transform disabled:opacity-60">
+                {sending ? <Loader2 className="w-5 h-5 animate-spin" /> : <Send className="w-5 h-5" />}
+              </button>
+            </div>
+          ) : (
+            <button data-testid="comment-login-prompt" onClick={() => navigate("/login")} className="w-full py-3 rounded-xl bg-slate-800 border border-slate-700 text-slate-300 text-sm font-medium">
+              Logga in för att kommentera
             </button>
-          </div>
+          )}
         </div>
       </div>
     </div>

@@ -11,7 +11,7 @@ const COLS = [
   { key: "wins", label: "V" },
   { key: "losses", label: "F" },
   { key: "last_places", label: "Sist" },
-  { key: "win_pct", label: "Vinst%" },
+  { key: "win_pct", label: "V%" },
 ];
 
 export default function Leaderboard() {

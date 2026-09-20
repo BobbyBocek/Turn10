@@ -24,18 +24,22 @@ function Loading() {
   );
 }
 
-function ProtectedLayout() {
+function MainLayout() {
   const { user } = useAuth();
-  if (user === null) return <Loading />;
-  if (user === false) return <Navigate to="/login" replace />;
+  if (user === null) return <Loading />; // väntar på auth-koll
   return (
     <div className="min-h-screen bg-[#090B10] max-w-md mx-auto relative">
-      <div className="pb-24">
-        <Outlet />
-      </div>
+      <div className="pb-24"><Outlet /></div>
       <BottomNav />
     </div>
   );
+}
+
+function RequireAuth({ children }) {
+  const { user } = useAuth();
+  if (user === null) return <Loading />;
+  if (user === false) return <Navigate to="/login" replace />;
+  return children;
 }
 
 function AppRouter() {
@@ -44,15 +48,17 @@ function AppRouter() {
   return (
     <Routes>
       <Route path="/login" element={<Login />} />
-      <Route element={<ProtectedLayout />}>
+      <Route element={<MainLayout />}>
+        {/* Publika (skrivskyddade) sidor */}
         <Route path="/" element={<Home />} />
-        <Route path="/ny-match" element={<NewMatch />} />
         <Route path="/historik" element={<History />} />
-        <Route path="/match/:id" element={<MatchDetail />} />
         <Route path="/topplista" element={<Leaderboard />} />
         <Route path="/regler" element={<Rules />} />
-        <Route path="/min-sida" element={<Profile />} />
+        <Route path="/match/:id" element={<MatchDetail />} />
         <Route path="/patchnotes" element={<PatchNotes />} />
+        {/* Kräver inloggning */}
+        <Route path="/ny-match" element={<RequireAuth><NewMatch /></RequireAuth>} />
+        <Route path="/min-sida" element={<RequireAuth><Profile /></RequireAuth>} />
       </Route>
       <Route path="*" element={<Navigate to="/" replace />} />
     </Routes>
