@@ -26,7 +26,7 @@ export default function CardPicker({ open, onClose, onSelect, initial }) {
           <motion.div
             initial={{ y: 300 }} animate={{ y: 0 }} exit={{ y: 300 }}
             onClick={(e) => e.stopPropagation()}
-            className="w-full max-w-md bg-slate-900 border-t border-amber-500/30 rounded-t-2xl p-5 pb-8"
+            className="w-full max-w-md bg-slate-900 border-t border-amber-500/30 rounded-t-2xl p-5 pb-8 max-h-[85vh] overflow-y-auto"
           >
             <div className="flex items-center justify-between mb-4">
               <h3 className="text-lg font-semibold text-slate-100 font-display">Välj utgångskort</h3>

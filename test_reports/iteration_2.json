@@ -1,0 +1,41 @@
+{
+  "summary": "Full end-to-end test of Turn10 rebrand+expansion (Swedish card-game app). Backend: 25/25 pytest cases green (including new Turn10 coverage: leaderboard shape with badges/monthly_best/v_ringad, awards history, vote status+cast+change, profile persist, exit-bonus math for rank 3=+5, rank 2=0, rank 10=0, and rank 5=+4/rank 8=+3/rank 14=0). Frontend: full flow verified end-to-end on mobile viewport (430x1200) — admin login → Home dashboard (Tommy, rating, Månadens spelare, V-ringad card, senaste matcher, CTA) → Starta ny match → 3-step Ny match wizard with round-table, player search, position dropdown, card-shaped rule toggles + custom rule creation with suit icon, exit-card picker (rank+suit), submit → Match detail with elo-change badges, exit-bonus text '+5 utgångsbonus' only on winner (rank 3), elo_before→elo_after arrow, PlayingCard rendered for exit cards, comment (text) + emoji reaction → Spela igen prefills 3 players → Historik loads → Topplista with Månadens banner and sortable columns (wins/losses/win_pct/rating) → Regler shows all 6+ Turn10 sections (Grunduppsättning, Spelets gång, Specialkort, Fejka, Kasta in kort, Superregeln) → Min sida save nickname/bg/symbol persists across reload → Patch-notes: any user can + add → V-ringad vote modal cast + change → Logout → /login redirect. All 6 bottom-nav tabs work.",
+  "backend_issues": {
+    "critical": [],
+    "minor": []
+  },
+  "frontend_issues": {
+    "ui_bugs": [],
+    "integration_issues": [],
+    "design_issues": [
+      {"screen": "CardPicker modal (mobile 430x900)", "issues": ["At iPhone-13-mini height the modal + bottom-nav can push the last row of ranks (J/Q/K/A) below the fold; requires manual scroll. Not blocking, but consider making the modal scrollable inside or reserving space above bottom-nav."]}
+    ]
+  },
+  "test_report_links": [
+    "/app/backend/tests/backend_test.py",
+    "/app/test_reports/pytest/pytest_results.xml"
+  ],
+  "action_items": [
+    "None. Optional: consider making CardPicker modal internally scrollable for very short viewports so bottom rank row (J/Q/K/A) is always reachable without scrolling the underlying page.",
+    "Optional carry-over from iter1: setState-in-render warning in Login.jsx (auto-redirect during render). Non-blocking."
+  ],
+  "critical_code_review_comments": [
+    "elo.exit_bonus is correctly implemented: 2 & 10 => 0, else max(round((15-v)*0.4),0). Verified numerically (3=>5, 5=>4, 8=>3, 14=>0).",
+    "server.py apply_match correctly stores utgangs_bonus separately and total elo_delta = base_delta + bonus; UI shows both, matching spec.",
+    "GET /api/leaderboard now returns an object {rows, badges, monthly_best, v_ringad}; frontend consumes correctly.",
+    "MonthlyVoteModal filters out current user from candidate list — correct.",
+    "Vote endpoint is upsert on (month, voter) with unique index — supports changing vote as required.",
+    "Enhancement (non-blocking): server.py at 779 lines is getting large; consider splitting auth/matches/awards into routers.",
+    "Enhancement: Home.jsx renders the vote banner unconditionally once vote_status resolves; it might be nicer to hide once user has voted (product decision)."
+  ],
+  "updated_files": [
+    "/app/backend/tests/backend_test.py"
+  ],
+  "success_rate": {"backend": "100% (25/25)", "frontend": "100% of the 16 requested review flows verified"},
+  "test_credentials": "Admin tom.jenssen@live.se / Kortspel2026!  ·  Players erik/johan/anders/sara/lisa @test.se / Spela123!",
+  "seed_data_creation": "None manually — used built-in seed (SEED_VERSION turn10-v4). Created ephemeral TEST_ rules, comments, patch notes, matches and monthly vote during UI/API testing. All persisted in test DB.",
+  "retest_needed": false,
+  "should_main_agent_self_test": true,
+  "context_for_next_testing_agent": "Backend regression suite lives at /app/backend/tests/backend_test.py (pytest, 25 cases, parallel-safe with pytest-xdist). Turn10-specific coverage added in class TestTurn10. Leaderboard returns object not list (updated test). Routes: /, /ny-match, /historik, /topplista, /regler, /min-sida, /patchnotes, /match/:id. Mobile viewport 430px. On very short viewports CardPicker's rank row can be below fold; use viewport height >= 1000 or scrollIntoView when clicking rank buttons in future playwright scripts.",
+  "rca_of_the_issue": "N/A — no bugs found this iteration. Only test-side fix: iter1 test asserted leaderboard is a list, but new Turn10 API returns an object with rows/badges/monthly_best/v_ringad; test was corrected accordingly."
+}

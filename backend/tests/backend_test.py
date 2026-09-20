@@ -85,7 +85,8 @@ class TestReads:
     def test_leaderboard(self, admin_session):
         r = admin_session.get(f"{API}/leaderboard")
         assert r.status_code == 200
-        assert isinstance(r.json(), list)
+        d = r.json()
+        assert isinstance(d, dict) and "rows" in d and isinstance(d["rows"], list)
 
     def test_patch_notes(self, admin_session):
         r = admin_session.get(f"{API}/patch-notes")
@@ -192,3 +193,92 @@ class TestPatchNotes:
         r = admin_session.post(f"{API}/patch-notes", json={"title": "TEST", "description": "d"})
         assert r.status_code == 200
         assert r.json()["author_name"]
+
+
+# --- Turn10 new features --------------------------------------------------
+class TestTurn10:
+    def _pick(self, sess, n):
+        users = sess.get(f"{API}/users").json()
+        return [u["id"] for u in users if u["email"] in PLAYERS][:n]
+
+    def test_leaderboard_shape(self, admin_session):
+        r = admin_session.get(f"{API}/leaderboard")
+        assert r.status_code == 200
+        d = r.json()
+        assert set(["rows", "badges", "monthly_best", "v_ringad"]).issubset(d.keys())
+        assert set(["win_streak", "most_comments", "most_losses", "monthly_best", "v_ringad"]).issubset(d["badges"].keys())
+        for row in d["rows"]:
+            assert "icon" in row and "bg" in row["icon"] and "symbol" in row["icon"]
+            assert "win_pct" in row
+
+    def test_awards_history(self, admin_session):
+        r = admin_session.get(f"{API}/awards/history")
+        assert r.status_code == 200
+        assert isinstance(r.json(), list)
+
+    def test_vote_status_and_cast(self, admin_session):
+        r = admin_session.get(f"{API}/vote/status")
+        assert r.status_code == 200
+        d = r.json()
+        assert "month" in d and "voted" in d
+        # pick a target != admin
+        users = admin_session.get(f"{API}/users").json()
+        target = next(u["id"] for u in users if u["email"] == "erik@test.se")
+        r2 = admin_session.post(f"{API}/vote", json={"voted_for": target})
+        assert r2.status_code == 200
+        d2 = r2.json()
+        assert d2["voted"] is True and d2["my_vote"] == target
+        # change vote
+        target2 = next(u["id"] for u in users if u["email"] == "sara@test.se")
+        r3 = admin_session.post(f"{API}/vote", json={"voted_for": target2})
+        assert r3.status_code == 200
+        assert r3.json()["my_vote"] == target2
+
+    def test_profile_update_persist(self, admin_session):
+        # save then reload me
+        r = admin_session.put(f"{API}/profile", json={"nickname": "Tommy", "icon": {"bg": "#E11D48", "symbol": "♠"}})
+        assert r.status_code == 200
+        me = admin_session.get(f"{API}/auth/me").json()
+        assert me["nickname"] == "Tommy"
+        assert me["icon"]["symbol"] == "♠"
+
+    def test_exit_bonus_math(self, admin_session):
+        # Player exits on 3 (+5), other on 2 (+0), other on 10 (+0)
+        ids = self._pick(admin_session, 3)
+        parts = [
+            {"user_id": ids[0], "placement": 1, "exit_card_value": 3, "exit_card_suit": "♠"},
+            {"user_id": ids[1], "placement": 2, "exit_card_value": 2, "exit_card_suit": "♥"},
+            {"user_id": ids[2], "placement": 3, "exit_card_value": 10, "exit_card_suit": "♦"},
+        ]
+        r = admin_session.post(f"{API}/matches", json={"participants": parts, "rule_ids": []})
+        assert r.status_code == 200, r.text
+        mid = r.json()["id"]
+        detail = admin_session.get(f"{API}/matches/{mid}").json()
+        pmap = {p["user_id"]: p for p in detail["participants"]}
+        assert pmap[ids[0]]["utgangs_bonus"] == 5
+        assert pmap[ids[1]]["utgangs_bonus"] == 0
+        assert pmap[ids[2]]["utgangs_bonus"] == 0
+        # total delta == base + bonus
+        for p in detail["participants"]:
+            assert p["elo_delta"] == p["elo_base_delta"] + p["utgangs_bonus"]
+            assert p["elo_after"] == p["elo_before"] + p["elo_delta"]
+        # exit card fields preserved
+        assert pmap[ids[0]]["exit_card_value"] == 3
+        assert pmap[ids[0]]["exit_card_suit"] == "♠"
+
+    def test_exit_bonus_values(self, admin_session):
+        # Direct sanity via a value 5 -> +4, value 14 -> 0 (max(round((15-14)*0.4),0)=0)
+        ids = self._pick(admin_session, 3)
+        parts = [
+            {"user_id": ids[0], "placement": 1, "exit_card_value": 5, "exit_card_suit": "♣"},
+            {"user_id": ids[1], "placement": 2, "exit_card_value": 14, "exit_card_suit": "♥"},
+            {"user_id": ids[2], "placement": 3, "exit_card_value": 8, "exit_card_suit": "♦"},
+        ]
+        r = admin_session.post(f"{API}/matches", json={"participants": parts, "rule_ids": []})
+        assert r.status_code == 200
+        mid = r.json()["id"]
+        detail = admin_session.get(f"{API}/matches/{mid}").json()
+        pmap = {p["user_id"]: p for p in detail["participants"]}
+        assert pmap[ids[0]]["utgangs_bonus"] == 4  # round((15-5)*0.4)=4
+        assert pmap[ids[1]]["utgangs_bonus"] == 0
+        assert pmap[ids[2]]["utgangs_bonus"] == 3  # round((15-8)*0.4)=round(2.8)=3

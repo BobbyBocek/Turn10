@@ -1,38 +1,38 @@
-# PRD – Kortkväll (kortspels-app med Elo & statistik)
+# PRD – Turn10 (vändtian-app med konton, Elo & statistik)
 
 ## Problemformulering
-Mobile-first webbapp på svenska för en sluten vänskapskrets (3–6 spelare/match). Konton krävs;
-registrera matchresultat, räkna Elo anpassad för sluten grupp, matchhistorik + kommentarer (shittalk),
-topplista, regelbibliotek och patch notes.
+Mobile-first webbapp "Turn10" på svenska för en sluten vänskapskrets som spelar en egen dubbel-lek-variant
+av vändtian (3–6 spelare). Konton krävs; registrera matcher, Elo anpassad för sluten grupp + utgångsbonus,
+matchhistorik + shittalk, topplista med badges & månadspriser, profiler, regler, patch notes.
 
 ## Arkitektur
-- Backend: FastAPI + MongoDB (motor). Auth: JWT e-post/lösenord (cookie `access_token`) + Emergent
-  Google Auth (cookie `session_token`), unified via `resolve_user`. Elo i central modul `backend/elo.py`.
-- Frontend: React + react-router + framer-motion + Tailwind. Mobil-container max-w-md, sticky bottennav (5 flikar).
+- Backend: FastAPI + MongoDB (motor). Auth: JWT e-post/lösenord + Emergent Google Auth (unified resolve_user).
+  Elo i central modul `backend/elo.py` (parvis Elo + exit_bonus). Full-reseed via SEED_VERSION-flagga.
+- Frontend: React + react-router + framer-motion + Tailwind. Mobil-container max-w-md, sticky 6-flikars bottennav.
+  Återanvändbar PlayingCard-komponent (rank+suit), RoundTable (SVG/CSS), PlayerAvatar, CardPicker, Badges.
 
-## Användarpersonas
-- Spelare i vänkretsen: loggar in, registrerar match direkt efter spelkväll, snackar skit i kommentarer.
-- Alla inloggade har samma rättigheter (ingen admin-hierarki i v1).
+## Branding
+Turn10 genomgående. Logo: spelkort med "10" + vändpil (public/turn10-logo.jpg). Mörkt casino-tema,
+guld (#F59E0B) + crimson (#E11D48) accenter.
 
-## Kärnkrav (statiska)
-- Endast registrerade konton kan väljas som deltagare. 3–6 spelare, unika placeringar.
-- Elo: start 1000; K=60 (<10 matcher), 20 (etablerad), 15 (elit ≥2000). Vinststreak-bonus (+15%/steg, max +75%).
-  Förluststreak-"mercy": man förlorar mindre för varje sista-plats i rad (−10%/steg, max −50%).
-- Position/regler/sista kort påverkar EJ Elo (endast statistik).
-- Topplista: endast spelare med ≥1 match; kolumner rating/V/F/sist/vinst%, sorterbar.
+## Elo (central funktion)
+- Start 1000. K=60 (<10 matcher), 20 (etablerad), 15 (elit ≥2000).
+- Vinststreak-bonus: K*(1+0.15*min(streak-1,5)). Förluststreak-dämpning: K*max(1-0.10*min(streak-1,5),0.5).
+- Utgångsbonus per spelare: round((15-kortvärde)*0.4), lägst 0; kort 2 & 10 => alltid 0. Adderas till delta.
+- Position/regler påverkar EJ Elo.
 
-## Implementerat (2026-06-19)
-- Auth (JWT + Google), seed: admin tom.jenssen@live.se + 5 testspelare, 10 regler (3 grund), 4 exempelmatcher, 2 patch notes.
-- Ny match (3-stegsflöde: deltagare → position + Worms-regelrutnät + skapa egen regel → placering m. pilar + sista kort).
-- Matchdetalj med Elo-badges (grön/röd) + shittalk (text/emoji, snabbval).
-- Historik, Topplista (sorterbar), Regler (grund + bibliotek, radera egna), Patch notes (lägg till).
-- Testad: backend 19/19 pytest, frontend alla kärnflöden (testing agent iteration_1).
+## Implementerat (2026-06)
+- v1 (Kortkväll): auth, ny match, historik, matchdetalj, topplista, regler, patch notes, Elo + streaks.
+- v2 (Turn10-rebrand): rebrand + logo; profiler (smeknamn + avatar bg/symbol); utgångsbonus;
+  PlayingCard-komponent + exit-card picker; Home-dashboard; RoundTable på Ny match; card-shaped regelväljare;
+  topplista-badges (🔥💬🥄👕🏆) + Månadens spelare + historik; V-ringad månadsomröstning; Spela igen; Min sida.
+- Seed: admin Tommy + 5 spelare med smeknamn/ikoner, Turn10-regler (7 grund + 4 tillval), 4 exempelmatcher.
+- Testat: backend 25/25 pytest, frontend 16/16 flöden (iteration_2, inga buggar).
 
 ## Backlog (ej gjort)
-- P1: Elo-graf/historik per spelare över tid (recharts).
-- P1: Redigera egna regler (endpoint finns, ej UI).
-- P2: Redigera/radera match, delad plats-hantering, spelarprofil-sida.
-- P2: Riktig realtidsuppdatering (nu refetch vid navigering).
+- P1: Elo-graf per spelare över tid (recharts).
+- P2: Redigera/ta bort match + rulla tillbaka Elo; auto-popup av röstning 1:a i månaden; egna bordspositioner-UI.
+- P2: Bildavatar-uppladdning (object storage).
 
 ## Nästa steg
 Se Next Action Items i finish-summary.
