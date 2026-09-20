@@ -4,7 +4,7 @@ import api from "../api";
 const AuthContext = createContext(null);
 
 export function AuthProvider({ children }) {
-  const [user, setUser] = useState(null); // null = checking, false = not auth, obj = auth
+  const [user, setUser] = useState(null);
 
   const checkAuth = useCallback(async () => {
     try {
@@ -15,8 +15,17 @@ export function AuthProvider({ children }) {
     }
   }, []);
 
+  const refreshUser = useCallback(async () => {
+    try {
+      const { data } = await api.get("/auth/me");
+      setUser(data);
+      return data;
+    } catch {
+      return null;
+    }
+  }, []);
+
   useEffect(() => {
-    // Om vi återvänder från Google OAuth, hoppa över /me-kontrollen. AuthCallback sköter det.
     if (window.location.hash?.includes("session_id=")) return;
     checkAuth();
   }, [checkAuth]);
@@ -27,7 +36,7 @@ export function AuthProvider({ children }) {
   };
 
   return (
-    <AuthContext.Provider value={{ user, setUser, checkAuth, logout }}>
+    <AuthContext.Provider value={{ user, setUser, checkAuth, refreshUser, logout }}>
       {children}
     </AuthContext.Provider>
   );

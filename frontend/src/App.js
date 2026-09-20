@@ -7,17 +7,19 @@ import { Loader2 } from "lucide-react";
 import Login from "./pages/Login";
 import AuthCallback from "./pages/AuthCallback";
 import BottomNav from "./components/BottomNav";
+import Home from "./pages/Home";
 import NewMatch from "./pages/NewMatch";
 import History from "./pages/History";
 import MatchDetail from "./pages/MatchDetail";
 import Leaderboard from "./pages/Leaderboard";
 import Rules from "./pages/Rules";
+import Profile from "./pages/Profile";
 import PatchNotes from "./pages/PatchNotes";
 
 function Loading() {
   return (
     <div className="min-h-screen flex items-center justify-center bg-[#090B10]">
-      <Loader2 className="w-8 h-8 text-sky-400 animate-spin" />
+      <Loader2 className="w-8 h-8 text-amber-400 animate-spin" />
     </div>
   );
 }
@@ -43,11 +45,13 @@ function AppRouter() {
     <Routes>
       <Route path="/login" element={<Login />} />
       <Route element={<ProtectedLayout />}>
-        <Route path="/" element={<NewMatch />} />
+        <Route path="/" element={<Home />} />
+        <Route path="/ny-match" element={<NewMatch />} />
         <Route path="/historik" element={<History />} />
         <Route path="/match/:id" element={<MatchDetail />} />
         <Route path="/topplista" element={<Leaderboard />} />
         <Route path="/regler" element={<Rules />} />
+        <Route path="/min-sida" element={<Profile />} />
         <Route path="/patchnotes" element={<PatchNotes />} />
       </Route>
       <Route path="*" element={<Navigate to="/" replace />} />

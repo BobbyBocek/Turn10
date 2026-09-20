@@ -8,9 +8,10 @@ load_dotenv(ROOT_DIR / '.env')
 from fastapi import FastAPI, APIRouter, Request, Response, HTTPException, Depends
 from starlette.middleware.cors import CORSMiddleware
 from motor.motor_asyncio import AsyncIOMotorClient
-from pydantic import BaseModel, Field, EmailStr
+from pydantic import BaseModel, EmailStr
 from typing import List, Optional
 from datetime import datetime, timezone, timedelta
+from collections import defaultdict
 import uuid
 import logging
 import bcrypt
@@ -19,7 +20,8 @@ import httpx
 
 import elo
 
-# --- DB --------------------------------------------------------------------
+SEED_VERSION = "turn10-v4"
+
 mongo_url = os.environ['MONGO_URL']
 client = AsyncIOMotorClient(mongo_url)
 db = client[os.environ['DB_NAME']]
@@ -40,6 +42,14 @@ def now_iso():
     return datetime.now(timezone.utc).isoformat()
 
 
+def current_month():
+    return datetime.now(timezone.utc).strftime("%Y-%m")
+
+
+def month_of(iso: str) -> str:
+    return (iso or "")[:7]
+
+
 def hash_password(pw: str) -> str:
     return bcrypt.hashpw(pw.encode("utf-8"), bcrypt.gensalt()).decode("utf-8")
 
@@ -57,12 +67,21 @@ def create_access_token(user_id: str) -> str:
     return jwt.encode(payload, JWT_SECRET, algorithm=JWT_ALG)
 
 
+def default_icon(name: str) -> dict:
+    return {"bg": "#334155", "symbol": (name or "?")[0].upper()}
+
+
 def public_user(u: dict) -> dict:
+    name = u.get("name")
+    nickname = u.get("nickname")
     return {
         "id": u["id"],
-        "name": u.get("name"),
+        "name": name,
+        "nickname": nickname,
+        "display_name": nickname or name,
         "email": u.get("email"),
         "picture": u.get("picture"),
+        "icon": u.get("icon") or default_icon(name),
         "auth_provider": u.get("auth_provider", "password"),
         "rating": u.get("rating", elo.START_RATING),
         "matches_played": u.get("matches_played", 0),
@@ -71,6 +90,7 @@ def public_user(u: dict) -> dict:
         "last_places": u.get("last_places", 0),
         "win_streak": u.get("win_streak", 0),
         "loss_streak": u.get("loss_streak", 0),
+        "max_win_streak": u.get("max_win_streak", 0),
         "created_at": u.get("created_at"),
     }
 
@@ -83,8 +103,6 @@ def set_auth_cookie(response: Response, key: str, value: str, max_age: int):
 async def resolve_user(request: Request) -> dict:
     auth_header = request.headers.get("Authorization", "")
     bearer = auth_header[7:] if auth_header.startswith("Bearer ") else None
-
-    # 1) JWT access_token (cookie eller bearer)
     for candidate in [request.cookies.get("access_token"), bearer]:
         if not candidate:
             continue
@@ -96,8 +114,6 @@ async def resolve_user(request: Request) -> dict:
                     return u
         except jwt.PyJWTError:
             pass
-
-    # 2) Emergent session_token (cookie eller bearer)
     session_token = request.cookies.get("session_token") or bearer
     if session_token:
         sess = await db.user_sessions.find_one({"session_token": session_token}, {"_id": 0})
@@ -111,12 +127,15 @@ async def resolve_user(request: Request) -> dict:
                 u = await db.users.find_one({"id": sess["user_id"]}, {"_id": 0})
                 if u:
                     return u
-
     raise HTTPException(status_code=401, detail="Ej inloggad")
 
 
 async def get_current_user(request: Request) -> dict:
     return await resolve_user(request)
+
+
+async def users_map():
+    return {u["id"]: u for u in await db.users.find({}, {"_id": 0}).to_list(1000)}
 
 
 # --- Models ----------------------------------------------------------------
@@ -131,6 +150,11 @@ class LoginInput(BaseModel):
     password: str
 
 
+class ProfileInput(BaseModel):
+    nickname: Optional[str] = None
+    icon: Optional[dict] = None
+
+
 class RuleInput(BaseModel):
     name: str
     description: Optional[str] = ""
@@ -142,7 +166,8 @@ class ParticipantInput(BaseModel):
     user_id: str
     placement: int
     table_position: Optional[str] = None
-    last_card: Optional[str] = None
+    exit_card_value: Optional[int] = None
+    exit_card_suit: Optional[str] = None
 
 
 class MatchInput(BaseModel):
@@ -165,27 +190,27 @@ class PatchNoteInput(BaseModel):
     description: str
 
 
-# --- Auth endpoints --------------------------------------------------------
+class VoteInput(BaseModel):
+    voted_for: str
+
+
+# --- Auth ------------------------------------------------------------------
 @api.post("/auth/register")
 async def register(data: RegisterInput, response: Response):
     email = data.email.lower()
     if await db.users.find_one({"email": email}):
         raise HTTPException(status_code=400, detail="E-postadressen är redan registrerad")
+    name = data.name.strip()
     user = {
-        "id": str(uuid.uuid4()),
-        "name": data.name.strip(),
-        "email": email,
-        "password_hash": hash_password(data.password),
-        "auth_provider": "password",
-        "picture": None,
-        "rating": elo.START_RATING,
-        "matches_played": 0, "wins": 0, "losses": 0, "last_places": 0,
-        "win_streak": 0, "loss_streak": 0,
+        "id": str(uuid.uuid4()), "name": name, "nickname": None, "email": email,
+        "password_hash": hash_password(data.password), "auth_provider": "password",
+        "picture": None, "icon": default_icon(name),
+        "rating": elo.START_RATING, "matches_played": 0, "wins": 0, "losses": 0,
+        "last_places": 0, "win_streak": 0, "loss_streak": 0, "max_win_streak": 0,
         "created_at": now_iso(),
     }
     await db.users.insert_one(user)
-    token = create_access_token(user["id"])
-    set_auth_cookie(response, "access_token", token, 604800)
+    set_auth_cookie(response, "access_token", create_access_token(user["id"]), 604800)
     return public_user(user)
 
 
@@ -195,8 +220,7 @@ async def login(data: LoginInput, response: Response):
     user = await db.users.find_one({"email": email}, {"_id": 0})
     if not user or not user.get("password_hash") or not verify_password(data.password, user["password_hash"]):
         raise HTTPException(status_code=401, detail="Fel e-post eller lösenord")
-    token = create_access_token(user["id"])
-    set_auth_cookie(response, "access_token", token, 604800)
+    set_auth_cookie(response, "access_token", create_access_token(user["id"]), 604800)
     return public_user(user)
 
 
@@ -213,28 +237,18 @@ async def google_session(request: Request, response: Response):
     email = data["email"].lower()
     user = await db.users.find_one({"email": email}, {"_id": 0})
     if not user:
+        name = data.get("name") or email.split("@")[0]
         user = {
-            "id": str(uuid.uuid4()),
-            "name": data.get("name") or email.split("@")[0],
-            "email": email,
-            "password_hash": None,
-            "auth_provider": "google",
-            "picture": data.get("picture"),
-            "rating": elo.START_RATING,
-            "matches_played": 0, "wins": 0, "losses": 0, "last_places": 0,
-            "win_streak": 0, "loss_streak": 0,
-            "created_at": now_iso(),
+            "id": str(uuid.uuid4()), "name": name, "nickname": None, "email": email,
+            "password_hash": None, "auth_provider": "google", "picture": data.get("picture"),
+            "icon": default_icon(name), "rating": elo.START_RATING, "matches_played": 0,
+            "wins": 0, "losses": 0, "last_places": 0, "win_streak": 0, "loss_streak": 0,
+            "max_win_streak": 0, "created_at": now_iso(),
         }
         await db.users.insert_one(user)
-    else:
-        if data.get("picture") and not user.get("picture"):
-            await db.users.update_one({"id": user["id"]}, {"$set": {"picture": data["picture"]}})
-            user["picture"] = data["picture"]
-
     session_token = data["session_token"]
     await db.user_sessions.insert_one({
-        "user_id": user["id"],
-        "session_token": session_token,
+        "user_id": user["id"], "session_token": session_token,
         "expires_at": (datetime.now(timezone.utc) + timedelta(days=7)).isoformat(),
         "created_at": now_iso(),
     })
@@ -257,6 +271,19 @@ async def logout(request: Request, response: Response):
     return {"ok": True}
 
 
+@api.put("/profile")
+async def update_profile(data: ProfileInput, user: dict = Depends(get_current_user)):
+    updates = {}
+    if data.nickname is not None:
+        updates["nickname"] = data.nickname.strip() or None
+    if data.icon is not None:
+        updates["icon"] = data.icon
+    if updates:
+        await db.users.update_one({"id": user["id"]}, {"$set": updates})
+    u = await db.users.find_one({"id": user["id"]}, {"_id": 0})
+    return public_user(u)
+
+
 # --- Users -----------------------------------------------------------------
 @api.get("/users")
 async def list_users(user: dict = Depends(get_current_user)):
@@ -267,8 +294,7 @@ async def list_users(user: dict = Depends(get_current_user)):
 # --- Positions -------------------------------------------------------------
 @api.get("/positions")
 async def list_positions(user: dict = Depends(get_current_user)):
-    docs = await db.positions.find({}, {"_id": 0}).sort("order", 1).to_list(100)
-    return docs
+    return await db.positions.find({}, {"_id": 0}).sort("order", 1).to_list(100)
 
 
 @api.post("/positions")
@@ -282,19 +308,14 @@ async def add_position(data: PositionInput, user: dict = Depends(get_current_use
 # --- Rules -----------------------------------------------------------------
 @api.get("/rules")
 async def list_rules(user: dict = Depends(get_current_user)):
-    docs = await db.rules.find({}, {"_id": 0}).to_list(1000)
-    return docs
+    return await db.rules.find({}, {"_id": 0}).to_list(1000)
 
 
 @api.post("/rules")
 async def create_rule(data: RuleInput, user: dict = Depends(get_current_user)):
     doc = {
-        "id": str(uuid.uuid4()),
-        "name": data.name.strip(),
-        "description": data.description or "",
-        "icon": data.icon or "Dices",
-        "is_base": data.is_base,
-        "created_by": user["id"],
+        "id": str(uuid.uuid4()), "name": data.name.strip(), "description": data.description or "",
+        "icon": data.icon or "Dices", "is_base": data.is_base, "created_by": user["id"],
         "created_at": now_iso(),
     }
     await db.rules.insert_one(doc)
@@ -327,13 +348,13 @@ async def delete_rule(rule_id: str, user: dict = Depends(get_current_user)):
 
 
 # --- Matches ---------------------------------------------------------------
-async def build_match_summary(m: dict) -> dict:
-    users_map = {u["id"]: u for u in await db.users.find({}, {"_id": 0}).to_list(1000)}
+async def build_match_summary(m: dict, umap=None) -> dict:
+    umap = umap or await users_map()
     parts = sorted(m["participants"], key=lambda p: p["placement"])
     for p in parts:
-        u = users_map.get(p["user_id"])
-        p["name"] = u["name"] if u else "Okänd"
-        p["picture"] = u.get("picture") if u else None
+        u = umap.get(p["user_id"])
+        p["name"] = (u.get("nickname") or u.get("name")) if u else "Okänd"
+        p["icon"] = (u.get("icon") or default_icon(u.get("name"))) if u else default_icon("?")
     winner = next((p for p in parts if p["placement"] == 1), None)
     comment_count = await db.comments.count_documents({"match_id": m["id"]})
     return {
@@ -344,76 +365,80 @@ async def build_match_summary(m: dict) -> dict:
     }
 
 
+async def apply_match(parts, rule_ids, creator_id, date=None):
+    """Kärnlogik för att spara en match och uppdatera Elo + statistik."""
+    n = len(parts)
+    umap = {}
+    for p in parts:
+        u = await db.users.find_one({"id": p["user_id"]}, {"_id": 0})
+        if not u:
+            raise HTTPException(status_code=400, detail="En vald spelare finns inte")
+        umap[p["user_id"]] = u
+
+    elo_input = [{
+        "user_id": p["user_id"], "rating": umap[p["user_id"]].get("rating", elo.START_RATING),
+        "matches_played": umap[p["user_id"]].get("matches_played", 0),
+        "win_streak": umap[p["user_id"]].get("win_streak", 0),
+        "loss_streak": umap[p["user_id"]].get("loss_streak", 0),
+        "placement": p["placement"],
+    } for p in parts]
+    changes = {c["user_id"]: c for c in elo.compute_match_elo(elo_input)}
+    worst = n
+
+    stored = []
+    for p in parts:
+        c = changes[p["user_id"]]
+        bonus = elo.exit_bonus(p.get("exit_card_value"))
+        total_delta = c["base_delta"] + bonus
+        elo_after = c["elo_before"] + total_delta
+        stored.append({
+            "user_id": p["user_id"], "placement": p["placement"],
+            "table_position": p.get("table_position"),
+            "exit_card_value": p.get("exit_card_value"), "exit_card_suit": p.get("exit_card_suit"),
+            "elo_before": c["elo_before"], "elo_base_delta": c["base_delta"],
+            "utgangs_bonus": bonus, "elo_delta": total_delta, "elo_after": elo_after,
+        })
+        u = umap[p["user_id"]]
+        is_win = p["placement"] == 1
+        is_last = p["placement"] == worst
+        await db.users.update_one({"id": p["user_id"]}, {"$set": {
+            "rating": elo_after,
+            "matches_played": u.get("matches_played", 0) + 1,
+            "wins": u.get("wins", 0) + (1 if is_win else 0),
+            "losses": u.get("losses", 0) + (0 if is_win else 1),
+            "last_places": u.get("last_places", 0) + (1 if is_last else 0),
+            "win_streak": c["new_win_streak"], "loss_streak": c["new_loss_streak"],
+            "max_win_streak": max(u.get("max_win_streak", 0), c["new_win_streak"]),
+        }})
+
+    match_doc = {
+        "id": str(uuid.uuid4()), "date": date or now_iso(), "created_by": creator_id,
+        "participants": stored, "rule_ids": rule_ids, "created_at": now_iso(),
+    }
+    await db.matches.insert_one(match_doc)
+    match_doc.pop("_id", None)
+    return match_doc
+
+
 @api.post("/matches")
 async def create_match(data: MatchInput, user: dict = Depends(get_current_user)):
     parts = data.participants
     n = len(parts)
     if n < 3 or n > 6:
         raise HTTPException(status_code=400, detail="En match kräver 3–6 deltagare")
-    placements = sorted(p.placement for p in parts)
-    if placements != list(range(1, n + 1)):
+    if sorted(p.placement for p in parts) != list(range(1, n + 1)):
         raise HTTPException(status_code=400, detail="Slutplaceringarna måste vara unika (1 till N)")
-    ids = [p.user_id for p in parts]
-    if len(set(ids)) != n:
+    if len({p.user_id for p in parts}) != n:
         raise HTTPException(status_code=400, detail="En spelare kan bara delta en gång")
-
-    users_map = {}
-    for pid in ids:
-        u = await db.users.find_one({"id": pid}, {"_id": 0})
-        if not u:
-            raise HTTPException(status_code=400, detail="En vald spelare finns inte")
-        users_map[pid] = u
-
-    elo_input = [{
-        "user_id": p.user_id,
-        "rating": users_map[p.user_id].get("rating", elo.START_RATING),
-        "matches_played": users_map[p.user_id].get("matches_played", 0),
-        "win_streak": users_map[p.user_id].get("win_streak", 0),
-        "loss_streak": users_map[p.user_id].get("loss_streak", 0),
-        "placement": p.placement,
-    } for p in parts]
-
-    changes = {c["user_id"]: c for c in elo.compute_match_elo(elo_input)}
-    worst = n
-
-    match_id = str(uuid.uuid4())
-    stored_parts = []
-    for p in parts:
-        c = changes[p.user_id]
-        stored_parts.append({
-            "user_id": p.user_id, "placement": p.placement,
-            "table_position": p.table_position, "last_card": p.last_card,
-            "elo_before": c["elo_before"], "elo_after": c["elo_after"], "elo_delta": c["elo_delta"],
-        })
-        u = users_map[p.user_id]
-        is_win = p.placement == 1
-        is_last = p.placement == worst
-        await db.users.update_one({"id": p.user_id}, {"$set": {
-            "rating": c["elo_after"],
-            "matches_played": u.get("matches_played", 0) + 1,
-            "wins": u.get("wins", 0) + (1 if is_win else 0),
-            "losses": u.get("losses", 0) + (0 if is_win else 1),
-            "last_places": u.get("last_places", 0) + (1 if is_last else 0),
-            "win_streak": c["new_win_streak"],
-            "loss_streak": c["new_loss_streak"],
-        }})
-
-    match_doc = {
-        "id": match_id,
-        "date": data.date or now_iso(),
-        "created_by": user["id"],
-        "participants": stored_parts,
-        "rule_ids": data.rule_ids,
-        "created_at": now_iso(),
-    }
-    await db.matches.insert_one(match_doc)
-    return await build_match_summary({**match_doc})
+    match_doc = await apply_match([p.model_dump() for p in parts], data.rule_ids, user["id"], data.date)
+    return await build_match_summary(match_doc)
 
 
 @api.get("/matches")
 async def list_matches(user: dict = Depends(get_current_user)):
     docs = await db.matches.find({}, {"_id": 0}).sort("date", -1).to_list(1000)
-    return [await build_match_summary(m) for m in docs]
+    umap = await users_map()
+    return [await build_match_summary(m, umap) for m in docs]
 
 
 @api.get("/matches/{match_id}")
@@ -422,8 +447,7 @@ async def get_match(match_id: str, user: dict = Depends(get_current_user)):
     if not m:
         raise HTTPException(status_code=404, detail="Matchen hittades inte")
     summary = await build_match_summary(m)
-    rules = await db.rules.find({"id": {"$in": m.get("rule_ids", [])}}, {"_id": 0}).to_list(100)
-    summary["rules"] = rules
+    summary["rules"] = await db.rules.find({"id": {"$in": m.get("rule_ids", [])}}, {"_id": 0}).to_list(100)
     return summary
 
 
@@ -431,11 +455,11 @@ async def get_match(match_id: str, user: dict = Depends(get_current_user)):
 @api.get("/matches/{match_id}/comments")
 async def list_comments(match_id: str, user: dict = Depends(get_current_user)):
     docs = await db.comments.find({"match_id": match_id}, {"_id": 0}).sort("created_at", 1).to_list(1000)
-    users_map = {u["id"]: u for u in await db.users.find({}, {"_id": 0}).to_list(1000)}
+    umap = await users_map()
     for c in docs:
-        u = users_map.get(c["user_id"])
-        c["name"] = u["name"] if u else "Okänd"
-        c["picture"] = u.get("picture") if u else None
+        u = umap.get(c["user_id"])
+        c["name"] = (u.get("nickname") or u.get("name")) if u else "Okänd"
+        c["icon"] = (u.get("icon") or default_icon(u.get("name"))) if u else default_icon("?")
     return docs
 
 
@@ -447,61 +471,176 @@ async def add_comment(match_id: str, data: CommentInput, user: dict = Depends(ge
         raise HTTPException(status_code=404, detail="Matchen hittades inte")
     doc = {
         "id": str(uuid.uuid4()), "match_id": match_id, "user_id": user["id"],
-        "text": (data.text or "").strip(), "emoji": (data.emoji or "").strip(),
-        "created_at": now_iso(),
+        "text": (data.text or "").strip(), "emoji": (data.emoji or "").strip(), "created_at": now_iso(),
     }
     await db.comments.insert_one(doc)
     doc.pop("_id", None)
-    return {**doc, "name": user["name"], "picture": user.get("picture")}
+    return {**doc, "name": user.get("nickname") or user["name"], "icon": user.get("icon") or default_icon(user["name"])}
+
+
+# --- Awards / badges helpers -----------------------------------------------
+async def monthly_elo_change(month: str):
+    """Summan av Elo-delta per spelare för en given månad (YYYY-MM)."""
+    totals = defaultdict(int)
+    docs = await db.matches.find({}, {"_id": 0}).to_list(2000)
+    for m in docs:
+        if month_of(m.get("date", "")) != month:
+            continue
+        for p in m["participants"]:
+            totals[p["user_id"]] += p.get("elo_delta", 0)
+    return totals
+
+
+async def best_player_of_month(month: str, umap):
+    totals = await monthly_elo_change(month)
+    best = None
+    for uid, val in totals.items():
+        if val > 0 and (best is None or val > best[1]):
+            best = (uid, val)
+    if not best:
+        return None
+    u = umap.get(best[0])
+    return {"user_id": best[0], "name": (u.get("nickname") or u.get("name")) if u else "Okänd", "total": best[1]}
+
+
+async def vote_winner_of_month(month: str, umap):
+    votes = await db.monthly_votes.find({"month": month}, {"_id": 0}).to_list(2000)
+    if not votes:
+        return None
+    tally = defaultdict(int)
+    for v in votes:
+        tally[v["voted_for"]] += 1
+    uid = max(tally, key=tally.get)
+    u = umap.get(uid)
+    return {"user_id": uid, "name": (u.get("nickname") or u.get("name")) if u else "Okänd", "votes": tally[uid]}
+
+
+def prev_month(month: str) -> str:
+    y, m = int(month[:4]), int(month[5:7])
+    m -= 1
+    if m == 0:
+        m = 12
+        y -= 1
+    return f"{y:04d}-{m:02d}"
 
 
 # --- Leaderboard -----------------------------------------------------------
 @api.get("/leaderboard")
 async def leaderboard(user: dict = Depends(get_current_user)):
-    users = await db.users.find({"matches_played": {"$gte": 1}}, {"_id": 0}).to_list(1000)
+    umap = await users_map()
+    played = [u for u in umap.values() if u.get("matches_played", 0) >= 1]
+
+    comment_counts = defaultdict(int)
+    for c in await db.comments.find({}, {"_id": 0, "user_id": 1}).to_list(5000):
+        comment_counts[c["user_id"]] += 1
+
     rows = []
-    for u in users:
+    for u in played:
         mp = u.get("matches_played", 0)
         wins = u.get("wins", 0)
         rows.append({
-            "id": u["id"], "name": u["name"], "picture": u.get("picture"),
-            "rating": u.get("rating", elo.START_RATING),
-            "wins": wins, "losses": u.get("losses", 0),
-            "last_places": u.get("last_places", 0),
-            "matches_played": mp,
+            "id": u["id"], "name": u.get("nickname") or u.get("name"),
+            "icon": u.get("icon") or default_icon(u.get("name")),
+            "rating": u.get("rating", elo.START_RATING), "wins": wins, "losses": u.get("losses", 0),
+            "last_places": u.get("last_places", 0), "matches_played": mp,
             "win_pct": round(100 * wins / mp) if mp else 0,
-            "win_streak": u.get("win_streak", 0),
+            "win_streak": u.get("win_streak", 0), "max_win_streak": u.get("max_win_streak", 0),
+            "comments": comment_counts.get(u["id"], 0),
         })
     rows.sort(key=lambda r: r["rating"], reverse=True)
-    return rows
+
+    def top(key):
+        cand = [r for r in rows if r.get(key, 0) > 0]
+        return max(cand, key=lambda r: r[key])["id"] if cand else None
+
+    cm = current_month()
+    monthly_best = await best_player_of_month(cm, umap)
+    v_ringad = await vote_winner_of_month(prev_month(cm), umap)
+
+    badges = {
+        "win_streak": top("max_win_streak"),
+        "most_comments": top("comments"),
+        "most_losses": top("losses"),
+        "monthly_best": monthly_best["user_id"] if monthly_best else None,
+        "v_ringad": v_ringad["user_id"] if v_ringad else None,
+    }
+    return {"rows": rows, "badges": badges, "monthly_best": monthly_best, "v_ringad": v_ringad}
+
+
+@api.get("/awards/history")
+async def awards_history(user: dict = Depends(get_current_user)):
+    umap = await users_map()
+    months = set()
+    for m in await db.matches.find({}, {"_id": 0, "date": 1}).to_list(2000):
+        months.add(month_of(m.get("date", "")))
+    for v in await db.monthly_votes.find({}, {"_id": 0, "month": 1}).to_list(2000):
+        months.add(v["month"])
+    cm = current_month()
+    result = []
+    for mth in sorted(months, reverse=True):
+        if not mth or mth == cm:
+            continue
+        result.append({
+            "month": mth,
+            "best_player": await best_player_of_month(mth, umap),
+            "v_ringad": await vote_winner_of_month(mth, umap),
+        })
+    return result
+
+
+# --- Voting ----------------------------------------------------------------
+@api.get("/vote/status")
+async def vote_status(user: dict = Depends(get_current_user)):
+    umap = await users_map()
+    cm = current_month()
+    votes = await db.monthly_votes.find({"month": cm}, {"_id": 0}).to_list(2000)
+    tally = defaultdict(int)
+    my_vote = None
+    for v in votes:
+        tally[v["voted_for"]] += 1
+        if v["voter"] == user["id"]:
+            my_vote = v["voted_for"]
+    tallies = [{"user_id": uid, "name": (umap.get(uid, {}).get("nickname") or umap.get(uid, {}).get("name")), "count": c}
+               for uid, c in sorted(tally.items(), key=lambda x: -x[1])]
+    return {"month": cm, "my_vote": my_vote, "voted": my_vote is not None, "tallies": tallies}
+
+
+@api.post("/vote")
+async def cast_vote(data: VoteInput, user: dict = Depends(get_current_user)):
+    cm = current_month()
+    if not await db.users.find_one({"id": data.voted_for}, {"_id": 0}):
+        raise HTTPException(status_code=400, detail="Spelaren finns inte")
+    await db.monthly_votes.update_one(
+        {"month": cm, "voter": user["id"]},
+        {"$set": {"voted_for": data.voted_for, "created_at": now_iso()}},
+        upsert=True,
+    )
+    return await vote_status(user)
 
 
 # --- Patch notes -----------------------------------------------------------
 @api.get("/patch-notes")
 async def list_patch_notes(user: dict = Depends(get_current_user)):
     docs = await db.patch_notes.find({}, {"_id": 0}).sort("created_at", -1).to_list(1000)
-    users_map = {u["id"]: u for u in await db.users.find({}, {"_id": 0}).to_list(1000)}
+    umap = await users_map()
     for d in docs:
-        u = users_map.get(d.get("author_id"))
-        d["author_name"] = u["name"] if u else "Okänd"
+        u = umap.get(d.get("author_id"))
+        d["author_name"] = (u.get("nickname") or u.get("name")) if u else "Okänd"
     return docs
 
 
 @api.post("/patch-notes")
 async def add_patch_note(data: PatchNoteInput, user: dict = Depends(get_current_user)):
-    doc = {
-        "id": str(uuid.uuid4()), "title": data.title.strip(),
-        "description": data.description.strip(), "author_id": user["id"],
-        "created_at": now_iso(),
-    }
+    doc = {"id": str(uuid.uuid4()), "title": data.title.strip(), "description": data.description.strip(),
+           "author_id": user["id"], "created_at": now_iso()}
     await db.patch_notes.insert_one(doc)
     doc.pop("_id", None)
-    return {**doc, "author_name": user["name"]}
+    return {**doc, "author_name": user.get("nickname") or user["name"]}
 
 
 @api.get("/")
 async def root():
-    return {"message": "Kortspel API"}
+    return {"message": "Turn10 API"}
 
 
 app.include_router(api)
@@ -516,125 +655,115 @@ app.add_middleware(
 
 
 # --- Seeding ---------------------------------------------------------------
+async def ensure_user(name, email, pw, nickname=None, icon=None):
+    existing = await db.users.find_one({"email": email})
+    if existing:
+        return existing["id"] if "id" in existing else existing
+    uid = str(uuid.uuid4())
+    await db.users.insert_one({
+        "id": uid, "name": name, "nickname": nickname, "email": email,
+        "password_hash": hash_password(pw), "auth_provider": "password", "picture": None,
+        "icon": icon or default_icon(name), "rating": elo.START_RATING, "matches_played": 0,
+        "wins": 0, "losses": 0, "last_places": 0, "win_streak": 0, "loss_streak": 0,
+        "max_win_streak": 0, "created_at": now_iso(),
+    })
+    return uid
+
+
 async def seed():
     await db.users.create_index("email", unique=True)
     await db.user_sessions.create_index("session_token")
+    await db.monthly_votes.create_index([("month", 1), ("voter", 1)], unique=True)
 
     admin_email = os.environ["ADMIN_EMAIL"].lower()
-    admin_pw = os.environ["ADMIN_PASSWORD"]
-    if not await db.users.find_one({"email": admin_email}):
-        await db.users.insert_one({
-            "id": str(uuid.uuid4()), "name": "Tom", "email": admin_email,
-            "password_hash": hash_password(admin_pw), "auth_provider": "password",
-            "picture": None, "rating": elo.START_RATING, "matches_played": 0,
-            "wins": 0, "losses": 0, "last_places": 0, "win_streak": 0, "loss_streak": 0,
-            "created_at": now_iso(),
-        })
+    await ensure_user("Tom", admin_email, os.environ["ADMIN_PASSWORD"],
+                      nickname="Tommy", icon={"bg": "#E11D48", "symbol": "♠"})
 
-    # Positioner
-    if await db.positions.count_documents({}) == 0:
-        for i, name in enumerate(["Dealer", "Under the gun", "Middle", "Cutoff", "Hijack", "Big blind"]):
-            await db.positions.insert_one({"id": str(uuid.uuid4()), "name": name, "order": i})
-
-    # Regler
-    if await db.rules.count_documents({}) == 0:
-        base = [
-            ("Vändtvång", "Om du kan lägga ett kort måste du göra det.", "RefreshCw"),
-            ("Dra tills du kan", "Dra kort från högen tills du kan spela.", "Layers"),
-            ("Sista kortet-varning", "Säg till högt när du har ett kort kvar.", "Bell"),
-        ]
-        optional = [
-            ("Plocka två", "Nästa spelare drar två kort och står över.", "Plus"),
-            ("Byt hand", "Alla byter hand med spelaren till vänster.", "ArrowLeftRight"),
-            ("Hoppa över", "Nästa spelare hoppas över.", "SkipForward"),
-            ("Färgbyte", "Spelaren väljer ny färg fritt.", "Palette"),
-            ("Dubbel giv", "Alla får dubbelt så många startkort.", "Copy"),
-            ("Tyst runda", "Ingen får prata under rundan.", "VolumeX"),
-            ("Snabbläggning", "Samma valör får läggas när som helst.", "Zap"),
-        ]
-        admin = await db.users.find_one({"email": admin_email}, {"_id": 0})
-        for name, desc, icon in base:
-            await db.rules.insert_one({"id": str(uuid.uuid4()), "name": name, "description": desc,
-                                       "icon": icon, "is_base": True, "created_by": admin["id"], "created_at": now_iso()})
-        for name, desc, icon in optional:
-            await db.rules.insert_one({"id": str(uuid.uuid4()), "name": name, "description": desc,
-                                       "icon": icon, "is_base": False, "created_by": admin["id"], "created_at": now_iso()})
-
-    # Testspelare
     seed_pw = os.environ.get("SEED_USER_PASSWORD", "Spela123!")
-    seed_players = [("Erik", "erik@test.se"), ("Johan", "johan@test.se"),
-                    ("Anders", "anders@test.se"), ("Sara", "sara@test.se"), ("Lisa", "lisa@test.se")]
-    for name, email in seed_players:
-        if not await db.users.find_one({"email": email}):
-            await db.users.insert_one({
-                "id": str(uuid.uuid4()), "name": name, "email": email,
-                "password_hash": hash_password(seed_pw), "auth_provider": "password",
-                "picture": None, "rating": elo.START_RATING, "matches_played": 0,
-                "wins": 0, "losses": 0, "last_places": 0, "win_streak": 0, "loss_streak": 0,
-                "created_at": now_iso(),
-            })
+    seed_players = [
+        ("Erik", "erik@test.se", "Kungen", {"bg": "#F59E0B", "symbol": "♥"}),
+        ("Johan", "johan@test.se", "Jocke", {"bg": "#10B981", "symbol": "♣"}),
+        ("Anders", "anders@test.se", "Ankan", {"bg": "#38BDF8", "symbol": "♦"}),
+        ("Sara", "sara@test.se", "SaSa", {"bg": "#A855F7", "symbol": "♠"}),
+        ("Lisa", "lisa@test.se", "Lisen", {"bg": "#EC4899", "symbol": "♥"}),
+    ]
+    for name, email, nick, icon in seed_players:
+        await ensure_user(name, email, seed_pw, nickname=nick, icon=icon)
 
-    # Exempelmatcher (endast om inga matcher finns)
-    if await db.matches.count_documents({}) == 0:
-        rules = await db.rules.find({}, {"_id": 0}).to_list(100)
-        base_rule_ids = [r["id"] for r in rules if r["is_base"]]
-        extra_rule = next((r["id"] for r in rules if not r["is_base"]), None)
-        players = await db.users.find({"email": {"$in": [e for _, e in seed_players]}}, {"_id": 0}).to_list(100)
-        pmap = {p["name"]: p["id"] for p in players}
-        positions = ["Dealer", "Under the gun", "Middle", "Cutoff", "Hijack"]
-        sample = [
-            (["Erik", "Johan", "Anders", "Sara"], base_rule_ids),
-            (["Sara", "Erik", "Lisa", "Johan", "Anders"], base_rule_ids + ([extra_rule] if extra_rule else [])),
-            (["Erik", "Sara", "Johan"], base_rule_ids),
-            (["Johan", "Erik", "Anders", "Lisa"], base_rule_ids),
-        ]
-        for order, rule_ids in sample:
-            parts_in = []
-            for idx, pname in enumerate(order):
-                parts_in.append({"user_id": pmap[pname], "placement": idx + 1,
-                                 "table_position": positions[idx], "last_card": None})
-            await _seed_match(parts_in, rule_ids, list(pmap.values())[0])
+    meta = await db.meta.find_one({"key": "seed_version"})
+    if meta and meta.get("value") == SEED_VERSION:
+        return
 
-    # Patch notes
-    if await db.patch_notes.count_documents({}) == 0:
-        admin = await db.users.find_one({"email": admin_email}, {"_id": 0})
-        notes = [
-            ("v1.0 – Lansering", "Första versionen! Konton, matchregistrering, Elo-rating, topplista, regelbibliotek och shittalk."),
-            ("Elo för sluten grupp", "Elo justerad för vår grupp: högre K för nya spelare och vinststreak-bonus."),
-        ]
-        for title, desc in notes:
-            await db.patch_notes.insert_one({"id": str(uuid.uuid4()), "title": title, "description": desc,
-                                             "author_id": admin["id"], "created_at": now_iso()})
+    # --- Full reseed av speldata (behåller konton) ---
+    for coll in ["matches", "comments", "rules", "positions", "patch_notes", "monthly_votes"]:
+        await db[coll].delete_many({})
+    await db.users.update_many({}, {"$set": {
+        "rating": elo.START_RATING, "matches_played": 0, "wins": 0, "losses": 0,
+        "last_places": 0, "win_streak": 0, "loss_streak": 0, "max_win_streak": 0}})
 
+    admin = await db.users.find_one({"email": admin_email}, {"_id": 0})
 
-async def _seed_match(parts, rule_ids, creator_id):
-    users_map = {}
-    for p in parts:
-        users_map[p["user_id"]] = await db.users.find_one({"id": p["user_id"]}, {"_id": 0})
-    elo_input = [{
-        "user_id": p["user_id"], "rating": users_map[p["user_id"]].get("rating", elo.START_RATING),
-        "matches_played": users_map[p["user_id"]].get("matches_played", 0),
-        "win_streak": users_map[p["user_id"]].get("win_streak", 0),
-        "loss_streak": users_map[p["user_id"]].get("loss_streak", 0),
-        "placement": p["placement"],
-    } for p in parts]
-    changes = {c["user_id"]: c for c in elo.compute_match_elo(elo_input)}
-    worst = len(parts)
-    stored = []
-    for p in parts:
-        c = changes[p["user_id"]]
-        stored.append({**p, "elo_before": c["elo_before"], "elo_after": c["elo_after"], "elo_delta": c["elo_delta"]})
-        u = users_map[p["user_id"]]
-        is_win = p["placement"] == 1
-        is_last = p["placement"] == worst
-        await db.users.update_one({"id": p["user_id"]}, {"$set": {
-            "rating": c["elo_after"], "matches_played": u.get("matches_played", 0) + 1,
-            "wins": u.get("wins", 0) + (1 if is_win else 0),
-            "losses": u.get("losses", 0) + (0 if is_win else 1),
-            "last_places": u.get("last_places", 0) + (1 if is_last else 0),
-            "win_streak": c["new_win_streak"], "loss_streak": c["new_loss_streak"]}})
-    await db.matches.insert_one({"id": str(uuid.uuid4()), "date": now_iso(), "created_by": creator_id,
-                                 "participants": stored, "rule_ids": rule_ids, "created_at": now_iso()})
+    # Sätt smeknamn/ikon för demospelare
+    await db.users.update_one({"email": admin_email}, {"$set": {"nickname": "Tommy", "icon": {"bg": "#E11D48", "symbol": "♠"}}})
+    for name, email, nick, icon in seed_players:
+        await db.users.update_one({"email": email}, {"$set": {"nickname": nick, "icon": icon}})
+
+    for i, name in enumerate(["Dealer", "Andra hand", "Mittemot", "Cutoff", "Hijack", "Sista hand"]):
+        await db.positions.insert_one({"id": str(uuid.uuid4()), "name": name, "order": i})
+
+    base = [
+        ("Tvåan nollställer", "En 2:a nollställer högen – nästa spelare får lägga valfritt kort.", "RotateCcw"),
+        ("Tian vänder", "En 10:a vänder bort hela högen ur spel; den som lade tian lägger vidare på tomt.", "RefreshCw"),
+        ("Chansa", "Ta ett blint kort från draghögen istället för att plocka upp direkt.", "Dices"),
+        ("Fejka (bluff)", "Lägg ett kort dolt. Synas det och är ogiltigt får du plocka upp högen.", "EyeOff"),
+        ("Kasta in kort", "Har du samma valör får du kasta in det innan nästa hinner lägga.", "Send"),
+        ("Dubbel & trippel", "Lägg flera kort av samma valör som en läggning.", "Copy"),
+        ("Superregeln", "Allt kaos gäller tills nästa spelares kort ligger – då är läggningen låst.", "Lock"),
+    ]
+    optional = [
+        ("Tyst runda", "Ingen får prata under rundan.", "VolumeX"),
+        ("Snabbläggning", "Samma valör får läggas när som helst.", "Zap"),
+        ("Ingen chansning", "Chansa-alternativet är avstängt denna match.", "ShieldOff"),
+        ("Dubbel giv", "Alla får dubbelt så många kort på hand.", "Layers"),
+    ]
+    for name, desc, icon in base:
+        await db.rules.insert_one({"id": str(uuid.uuid4()), "name": name, "description": desc,
+                                   "icon": icon, "is_base": True, "created_by": admin["id"], "created_at": now_iso()})
+    for name, desc, icon in optional:
+        await db.rules.insert_one({"id": str(uuid.uuid4()), "name": name, "description": desc,
+                                   "icon": icon, "is_base": False, "created_by": admin["id"], "created_at": now_iso()})
+
+    rules = await db.rules.find({}, {"_id": 0}).to_list(100)
+    base_rule_ids = [r["id"] for r in rules if r["is_base"]]
+    extra_rule = next((r["id"] for r in rules if not r["is_base"]), None)
+    players = await db.users.find({"email": {"$in": [e for _, e, _, _ in seed_players]}}, {"_id": 0}).to_list(100)
+    pmap = {p["name"]: p["id"] for p in players}
+    positions = ["Dealer", "Andra hand", "Mittemot", "Cutoff", "Hijack"]
+    suits = ["♥", "♦", "♣", "♠"]
+    sample = [
+        (["Erik", "Johan", "Anders", "Sara"], [3, 7, 12, 5]),
+        (["Sara", "Erik", "Lisa", "Johan", "Anders"], [4, 6, 9, 14, 3]),
+        (["Erik", "Sara", "Johan"], [5, 10, 8]),
+        (["Johan", "Erik", "Anders", "Lisa"], [3, 11, 2, 7]),
+    ]
+    for order, cards in sample:
+        parts_in = []
+        for idx, pname in enumerate(order):
+            parts_in.append({"user_id": pmap[pname], "placement": idx + 1,
+                             "table_position": positions[idx], "exit_card_value": cards[idx],
+                             "exit_card_suit": suits[idx % 4]})
+        rid = base_rule_ids + ([extra_rule] if extra_rule else [])
+        await apply_match(parts_in, rid, admin["id"])
+
+    notes = [
+        ("Turn10 v1.0 – Lansering 🎴", "Ny app för vår vändtian! Konton, matcher, Elo, topplista, regler och shittalk."),
+        ("Utgångsbonus & månadspriser", "Elo får nu bonus efter vilket kort du går ut på. Lägre kort = mer poäng. Plus månadens spelare och V-ringad-omröstning!"),
+    ]
+    for title, desc in notes:
+        await db.patch_notes.insert_one({"id": str(uuid.uuid4()), "title": title, "description": desc,
+                                         "author_id": admin["id"], "created_at": now_iso()})
+
+    await db.meta.update_one({"key": "seed_version"}, {"$set": {"value": SEED_VERSION}}, upsert=True)
 
 
 @app.on_event("startup")

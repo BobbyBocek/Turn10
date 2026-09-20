@@ -12,11 +12,8 @@ export default function AuthCallback() {
   useEffect(() => {
     if (hasProcessed.current) return;
     hasProcessed.current = true;
-
-    const hash = window.location.hash;
-    const match = hash.match(/session_id=([^&]+)/);
+    const match = window.location.hash.match(/session_id=([^&]+)/);
     const sessionId = match ? match[1] : null;
-
     const run = async () => {
       if (!sessionId) { navigate("/login", { replace: true }); return; }
       try {
@@ -33,7 +30,7 @@ export default function AuthCallback() {
 
   return (
     <div className="min-h-screen flex items-center justify-center bg-[#090B10]">
-      <Loader2 className="w-8 h-8 text-sky-400 animate-spin" />
+      <Loader2 className="w-8 h-8 text-amber-400 animate-spin" />
     </div>
   );
 }

@@ -2,7 +2,7 @@ import { useState, useEffect } from "react";
 import { useNavigate } from "react-router-dom";
 import { useAuth } from "../context/AuthContext";
 import api, { formatError } from "../api";
-import { Spade, Loader2 } from "lucide-react";
+import { Loader2 } from "lucide-react";
 import { toast } from "sonner";
 
 export default function Login() {
@@ -42,12 +42,10 @@ export default function Login() {
 
   return (
     <div className="min-h-screen flex flex-col justify-center px-6 py-12 bg-[#090B10] text-slate-100 max-w-md mx-auto">
-      <div className="mb-10 text-center">
-        <div className="inline-flex items-center justify-center w-16 h-16 rounded-2xl bg-sky-500/15 border border-sky-500/40 glow-primary mb-4">
-          <Spade className="w-8 h-8 text-sky-400" />
-        </div>
-        <h1 className="text-3xl font-bold font-display tracking-tight">Kortkväll</h1>
-        <p className="text-slate-400 text-sm mt-1">Elo, statistik & shittalk för gänget</p>
+      <div className="mb-8 text-center">
+        <img data-testid="app-logo" src="/turn10-logo.jpg" alt="Turn10" className="w-24 h-24 rounded-2xl mx-auto mb-4 glow-gold border border-amber-500/30" />
+        <h1 className="text-4xl font-black font-display tracking-tight">Turn10</h1>
+        <p className="text-slate-400 text-sm mt-1">Den ultimata vändtian-appen för gänget</p>
       </div>
 
       <div className="flex bg-slate-900/60 rounded-xl p-1 mb-6 border border-slate-800">
@@ -57,7 +55,7 @@ export default function Login() {
             data-testid={`auth-tab-${m}`}
             onClick={() => setMode(m)}
             className={`flex-1 py-2.5 rounded-lg text-sm font-semibold transition-colors ${
-              mode === m ? "bg-sky-500 text-slate-950" : "text-slate-400"
+              mode === m ? "bg-amber-500 text-slate-950" : "text-slate-400"
             }`}
           >
             {m === "login" ? "Logga in" : "Skapa konto"}
@@ -67,39 +65,15 @@ export default function Login() {
 
       <form onSubmit={submit} className="space-y-3">
         {mode === "register" && (
-          <input
-            data-testid="register-name-input"
-            value={name}
-            onChange={(e) => setName(e.target.value)}
-            placeholder="Namn"
-            required
-            className="w-full px-4 py-3.5 rounded-xl bg-slate-900 border border-slate-700 focus:border-sky-500 outline-none"
-          />
+          <input data-testid="register-name-input" value={name} onChange={(e) => setName(e.target.value)} placeholder="Namn" required
+            className="w-full px-4 py-3.5 rounded-xl bg-slate-900 border border-slate-700 focus:border-amber-500 outline-none" />
         )}
-        <input
-          data-testid="auth-email-input"
-          type="email"
-          value={email}
-          onChange={(e) => setEmail(e.target.value)}
-          placeholder="E-post"
-          required
-          className="w-full px-4 py-3.5 rounded-xl bg-slate-900 border border-slate-700 focus:border-sky-500 outline-none"
-        />
-        <input
-          data-testid="auth-password-input"
-          type="password"
-          value={password}
-          onChange={(e) => setPassword(e.target.value)}
-          placeholder="Lösenord"
-          required
-          className="w-full px-4 py-3.5 rounded-xl bg-slate-900 border border-slate-700 focus:border-sky-500 outline-none"
-        />
-        <button
-          data-testid="auth-submit-button"
-          type="submit"
-          disabled={loading}
-          className="w-full py-3.5 rounded-xl bg-sky-500 text-slate-950 font-bold flex items-center justify-center gap-2 active:scale-[0.98] transition-transform disabled:opacity-60"
-        >
+        <input data-testid="auth-email-input" type="email" value={email} onChange={(e) => setEmail(e.target.value)} placeholder="E-post" required
+          className="w-full px-4 py-3.5 rounded-xl bg-slate-900 border border-slate-700 focus:border-amber-500 outline-none" />
+        <input data-testid="auth-password-input" type="password" value={password} onChange={(e) => setPassword(e.target.value)} placeholder="Lösenord" required
+          className="w-full px-4 py-3.5 rounded-xl bg-slate-900 border border-slate-700 focus:border-amber-500 outline-none" />
+        <button data-testid="auth-submit-button" type="submit" disabled={loading}
+          className="w-full py-3.5 rounded-xl bg-amber-500 text-slate-950 font-bold flex items-center justify-center gap-2 active:scale-[0.98] transition-transform disabled:opacity-60">
           {loading && <Loader2 className="w-4 h-4 animate-spin" />}
           {mode === "login" ? "Logga in" : "Skapa konto"}
         </button>
@@ -111,11 +85,8 @@ export default function Login() {
         <div className="flex-1 h-px bg-slate-800" />
       </div>
 
-      <button
-        data-testid="google-login-button"
-        onClick={googleLogin}
-        className="w-full py-3.5 rounded-xl bg-white text-slate-900 font-semibold flex items-center justify-center gap-2 active:scale-[0.98] transition-transform"
-      >
+      <button data-testid="google-login-button" onClick={googleLogin}
+        className="w-full py-3.5 rounded-xl bg-white text-slate-900 font-semibold flex items-center justify-center gap-2 active:scale-[0.98] transition-transform">
         <img src="https://www.gstatic.com/firebasejs/ui/2.0.0/images/auth/google.svg" alt="" className="w-5 h-5" />
         Fortsätt med Google
       </button>
