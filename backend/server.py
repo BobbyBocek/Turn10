@@ -766,90 +766,12 @@ async def seed():
     await db.user_sessions.create_index("session_token")
     await db.monthly_votes.create_index([("month", 1), ("voter", 1)], unique=True)
 
-    admin_email = os.environ["ADMIN_EMAIL"].lower()
-    await ensure_user("Tom", admin_email, os.environ["ADMIN_PASSWORD"],
-                      nickname="Tommy", icon={"bg": "#E11D48", "symbol": "♠"})
+    # Skarp lansering: inga testkonton eller demodata seedas längre.
+    # Regelbibliotek, positioner och patch notes finns redan i databasen.
+    # Det första riktiga kontot skapas via registrering med inbjudningskod.
+    return
 
-    seed_pw = os.environ.get("SEED_USER_PASSWORD", "Spela123!")
-    seed_players = [
-        ("Erik", "erik@test.se", "Kungen", {"bg": "#F59E0B", "symbol": "♥"}),
-        ("Johan", "johan@test.se", "Jocke", {"bg": "#10B981", "symbol": "♣"}),
-        ("Anders", "anders@test.se", "Ankan", {"bg": "#38BDF8", "symbol": "♦"}),
-        ("Sara", "sara@test.se", "SaSa", {"bg": "#A855F7", "symbol": "♠"}),
-        ("Lisa", "lisa@test.se", "Lisen", {"bg": "#EC4899", "symbol": "♥"}),
-    ]
-    for name, email, nick, icon in seed_players:
-        await ensure_user(name, email, seed_pw, nickname=nick, icon=icon)
 
-    meta = await db.meta.find_one({"key": "seed_version"})
-    if meta and meta.get("value") == SEED_VERSION:
-        return
-
-    # --- Full reseed av speldata (behåller konton) ---
-    for coll in ["matches", "comments", "rules", "positions", "patch_notes", "monthly_votes"]:
-        await db[coll].delete_many({})
-    await db.users.update_many({}, {"$set": {
-        "rating": elo.START_RATING, "matches_played": 0, "wins": 0, "losses": 0,
-        "last_places": 0, "win_streak": 0, "loss_streak": 0, "max_win_streak": 0}})
-
-    admin = await db.users.find_one({"email": admin_email}, {"_id": 0})
-
-    # Sätt smeknamn/ikon för demospelare
-    await db.users.update_one({"email": admin_email}, {"$set": {"nickname": "Tommy", "icon": {"bg": "#E11D48", "symbol": "♠"}}})
-    for name, email, nick, icon in seed_players:
-        await db.users.update_one({"email": email}, {"$set": {"nickname": nick, "icon": icon}})
-
-    for i, name in enumerate(["Dealer", "Andra hand", "Mittemot", "Cutoff", "Hijack", "Sista hand"]):
-        await db.positions.insert_one({"id": str(uuid.uuid4()), "name": name, "order": i})
-
-    # Grundregler (är_grundregel=true) – valbara regelobjekt med kort-liknande ikoner.
-    base_rules = [
-        ("Tvåan nollställer", "En 2:a nollställer högen – nästa spelare får lägga valfritt kort.", "card:2"),
-        ("Tian vänder", "En 10:a vänder bort hela högen ur spel; den som lade tian lägger vidare på tomt.", "card:10"),
-        ("Chansa", "Ta ett blint kort från draghögen istället för att plocka upp direkt.", "Dices"),
-        ("Fejka (bluff)", "Lägg ett kort dolt. Synas det och är ogiltigt får du plocka upp högen.", "EyeOff"),
-        ("Kasta in kort", "Har du samma valör får du kasta in det innan nästa hinner lägga.", "Send"),
-        ("Dubbel & trippel", "Lägg flera kort av samma valör som en läggning.", "Copy"),
-        ("Superregeln", "Allt kaos gäller tills nästa spelares kort ligger – då är läggningen låst.", "Lock"),
-    ]
-    for name, desc, icon in base_rules:
-        await db.rules.insert_one({"id": str(uuid.uuid4()), "name": name, "description": desc,
-                                   "icon": icon, "is_base": True, "category": "special",
-                                   "created_by": admin["id"], "created_at": now_iso()})
-    all_base_ids = [r["id"] for r in await db.rules.find({"is_base": True}, {"_id": 0}).to_list(50)]
-
-    players = await db.users.find({"email": {"$in": [e for _, e, _, _ in seed_players]}}, {"_id": 0}).to_list(100)
-    pmap = {p["name"]: p["id"] for p in players}
-    positions = ["Dealer", "Andra hand", "Mittemot", "Cutoff", "Hijack"]
-    suits = ["♥", "♦", "♣", "♠"]
-    sample = [
-        (["Erik", "Johan", "Anders", "Sara"], [3, 7, 12, 5]),
-        (["Sara", "Erik", "Lisa", "Johan", "Anders"], [4, 6, 9, 14, 3]),
-        (["Erik", "Sara", "Johan"], [5, 10, 8]),
-        (["Johan", "Erik", "Anders", "Lisa"], [3, 11, 2, 7]),
-    ]
-    for si, (order, cards) in enumerate(sample):
-        parts_in = []
-        n = len(order)
-        for idx, pname in enumerate(order):
-            is_last = idx == n - 1
-            parts_in.append({"user_id": pmap[pname], "placement": idx + 1,
-                             "table_position": positions[idx],
-                             "exit_card_value": None if is_last else cards[idx],
-                             "exit_card_suit": None if is_last else suits[idx % 4]})
-        # Ärver alla grundregler; match 2 begränsar en grundregel (för strikethrough-demo)
-        rids = all_base_ids[:] if si != 1 else all_base_ids[1:]
-        await apply_match(parts_in, rids, admin["id"])
-
-    notes = [
-        ("Turn10 v1.0 – Lansering 🎴", "Ny app för vår vändtian! Konton, matcher, Elo, topplista, regler och shittalk."),
-        ("Utgångsbonus & månadspriser", "Elo får nu bonus efter vilket kort du går ut på. Lägre kort = mer poäng. Plus månadens spelare och V-ringad-omröstning!"),
-    ]
-    for title, desc in notes:
-        await db.patch_notes.insert_one({"id": str(uuid.uuid4()), "title": title, "description": desc,
-                                         "author_id": admin["id"], "created_at": now_iso()})
-
-    await db.meta.update_one({"key": "seed_version"}, {"$set": {"value": SEED_VERSION}}, upsert=True)
 
 
 @app.on_event("startup")
