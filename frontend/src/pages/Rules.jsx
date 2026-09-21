@@ -17,6 +17,7 @@ const GAME_RULES = [
   { h: "Kasta in kort", p: ["Ser du att någon är på väg att lägga ett kort du också har, får du kasta in ditt eget av samma valör innan de hinner.", "Lyckas den andra ändå lägga sitt kort (det \"sitter\") räknas det som lagt."] },
   { h: "Dubbel / trippel", p: ["Du får lägga flera kort av samma valör samtidigt som en läggning.", "Blir du påkommen med att korten inte matchar (fusk) plockar du upp dem och får bara lägga ett."] },
   { h: "Superregeln (turordningens låsning)", p: ["Allt kaos mellan dragen – bluffar, inkast, dubbel/trippel – är öppet och kan ifrågasättas ända tills nästa spelare lägger sitt kort ovanpå.", "När nästa spelares kort ligger där är föregående läggning låst och godkänd. Hittar ingen på något innan turen går vidare, så gäller det som lagts."] },
+  { h: "Hur ratingen funkar", p: ["Alla börjar på 1000 poäng. Vinner du mot någon med högre rating får du mer poäng än om du vinner mot någon med lägre rating – och tvärtom när du förlorar. Din poäng jämförs mot alla andra i matchen, inte bara mot vinnaren, så hela placeringen räknas.", "Nya spelare svänger mer i rating de första matcherna för att snabbt hitta rätt nivå. Vinner du flera matcher i rad får du lite extra poäng varje gång – och tvärtom, är du inne i en tuff period förlorar du mindre poäng ju längre den pågår, så det inte känns hopplöst.", "Du får också en liten bonus baserat på vilket kort du lägger sist när du går ut – ju lägre kort, desto mer bonus. Kommer du sist i en match finns inget utgångskort att välja (du tog ju inte slut på kort), så då blir det ingen bonus den gången."] },
 ];
 
 export default function Rules() {
@@ -99,7 +100,14 @@ export default function Rules() {
 
         {rules === null && <div className="flex justify-center py-6"><Loader2 className="w-6 h-6 text-amber-400 animate-spin" /></div>}
         {rules && rules.length === 0 && <p className="text-sm text-slate-500 py-6 text-center">Inga regler ännu. {user ? "Tryck + för att lägga till din första." : "Logga in för att lägga till regler."}</p>}
-        <div className="grid grid-cols-2 gap-2.5">{sorted.map((r) => <RuleCard key={r.id} r={r} />)}</div>
+        {rules && sorted.filter((r) => r.is_base).length > 0 && (
+          <>
+            <h3 className="text-sm font-bold font-display text-amber-400 mb-2 flex items-center gap-1.5">🃏 Grundregler <span className="text-[11px] font-normal text-slate-500">(grundspelet)</span></h3>
+            <div className="grid grid-cols-2 gap-2.5 mb-5">{sorted.filter((r) => r.is_base).map((r) => <RuleCard key={r.id} r={r} />)}</div>
+          </>
+        )}
+        <h3 className="text-sm font-bold font-display text-slate-100 mb-2">Tillval ({sorted.filter((r) => !r.is_base).length})</h3>
+        <div className="grid grid-cols-2 gap-2.5">{sorted.filter((r) => !r.is_base).map((r) => <RuleCard key={r.id} r={r} />)}</div>
         {!user && rules?.length > 0 && <p className="text-xs text-slate-600 mt-4">Logga in för att skapa och redigera regler.</p>}
       </div>
 

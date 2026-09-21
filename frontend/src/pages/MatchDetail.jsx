@@ -5,6 +5,7 @@ import Header from "../components/Header";
 import RuleIcon from "../components/RuleIcon";
 import PlayerAvatar from "../components/PlayerAvatar";
 import PlayingCard from "../components/PlayingCard";
+import MatchRoundTable from "../components/MatchRoundTable";
 import { useAuth } from "../context/AuthContext";
 import { toast } from "sonner";
 import { motion } from "framer-motion";
@@ -61,6 +62,9 @@ export default function MatchDetail() {
       <Header title="Matchdetaljer" subtitle={fmtDateTime(match.date)}
         right={user ? <button data-testid="play-again-button" onClick={playAgain} className="flex items-center gap-1 px-3 py-2 rounded-lg bg-amber-500 text-slate-950 text-xs font-bold active:scale-95 transition-transform"><RotateCw className="w-4 h-4" /> Spela igen</button> : undefined} />
       <div className="px-4 py-4 space-y-5">
+        {/* Bordsvy: placering, Elo & utgångskort */}
+        <MatchRoundTable participants={match.participants} />
+
         <div className="space-y-2">
           {match.participants.map((p, idx) => {
             const isWinner = p.placement === 1;
@@ -87,17 +91,27 @@ export default function MatchDetail() {
           })}
         </div>
 
-        {match.rules && match.rules.length > 0 && (
+        {(match.all_base_rules?.length > 0 || (match.rules && match.rules.length > 0)) && (
           <div>
-            <h3 className="text-xs uppercase tracking-wider text-slate-400 font-mono mb-2">Aktiva regler</h3>
+            <h3 className="text-xs uppercase tracking-wider text-slate-400 font-mono mb-2">Regler i matchen</h3>
             <div className="grid grid-cols-2 gap-2">
-              {match.rules.map((r) => (
-                <div key={r.id} className="flex items-center gap-2 px-3 py-2 rounded-lg bg-gradient-to-b from-slate-800/80 to-slate-900 border border-amber-500/20">
-                  <RuleIcon name={r.icon} className="w-4 h-4 text-amber-400" />
+              {(match.all_base_rules || []).map((r) => {
+                const active = (match.rule_ids || []).includes(r.id);
+                return (
+                  <div key={r.id} className="flex items-center gap-2 px-3 py-2 rounded-lg bg-gradient-to-b from-slate-800/80 to-slate-900 border border-amber-500/20">
+                    <RuleIcon name={r.icon} className="w-4 h-4 text-amber-400" style={active ? {} : { opacity: 0.5 }} />
+                    <span className={`text-xs truncate ${active ? "text-slate-200" : "text-rose-400/80 line-through"}`}>{r.name}</span>
+                  </div>
+                );
+              })}
+              {(match.rules || []).filter((r) => !r.is_base).map((r) => (
+                <div key={r.id} className="flex items-center gap-2 px-3 py-2 rounded-lg bg-slate-800/60 border border-slate-700">
+                  <RuleIcon name={r.icon} className="w-4 h-4 text-sky-400" />
                   <span className="text-xs text-slate-200 truncate">{r.name}</span>
                 </div>
               ))}
             </div>
+            <p className="text-[10px] text-slate-600 mt-1.5">Grundregler visas alltid; överstrukna gällde inte denna match.</p>
           </div>
         )}
 

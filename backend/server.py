@@ -20,7 +20,7 @@ import httpx
 
 import elo
 
-SEED_VERSION = "turn10-v5"
+SEED_VERSION = "turn10-v6"
 
 mongo_url = os.environ['MONGO_URL']
 client = AsyncIOMotorClient(mongo_url)
@@ -473,6 +473,7 @@ async def get_match(match_id: str, user=Depends(optional_user)):
         raise HTTPException(status_code=404, detail="Matchen hittades inte")
     summary = await build_match_summary(m)
     summary["rules"] = await db.rules.find({"id": {"$in": m.get("rule_ids", [])}}, {"_id": 0}).to_list(100)
+    summary["all_base_rules"] = await db.rules.find({"is_base": True}, {"_id": 0}).to_list(100)
     return summary
 
 
@@ -801,7 +802,21 @@ async def seed():
     for i, name in enumerate(["Dealer", "Andra hand", "Mittemot", "Cutoff", "Hijack", "Sista hand"]):
         await db.positions.insert_one({"id": str(uuid.uuid4()), "name": name, "order": i})
 
-    # Inga exempelregler seedas – riktiga regler läggs till manuellt i appen.
+    # Grundregler (är_grundregel=true) – valbara regelobjekt med kort-liknande ikoner.
+    base_rules = [
+        ("Tvåan nollställer", "En 2:a nollställer högen – nästa spelare får lägga valfritt kort.", "card:2"),
+        ("Tian vänder", "En 10:a vänder bort hela högen ur spel; den som lade tian lägger vidare på tomt.", "card:10"),
+        ("Chansa", "Ta ett blint kort från draghögen istället för att plocka upp direkt.", "Dices"),
+        ("Fejka (bluff)", "Lägg ett kort dolt. Synas det och är ogiltigt får du plocka upp högen.", "EyeOff"),
+        ("Kasta in kort", "Har du samma valör får du kasta in det innan nästa hinner lägga.", "Send"),
+        ("Dubbel & trippel", "Lägg flera kort av samma valör som en läggning.", "Copy"),
+        ("Superregeln", "Allt kaos gäller tills nästa spelares kort ligger – då är läggningen låst.", "Lock"),
+    ]
+    for name, desc, icon in base_rules:
+        await db.rules.insert_one({"id": str(uuid.uuid4()), "name": name, "description": desc,
+                                   "icon": icon, "is_base": True, "category": "special",
+                                   "created_by": admin["id"], "created_at": now_iso()})
+    all_base_ids = [r["id"] for r in await db.rules.find({"is_base": True}, {"_id": 0}).to_list(50)]
 
     players = await db.users.find({"email": {"$in": [e for _, e, _, _ in seed_players]}}, {"_id": 0}).to_list(100)
     pmap = {p["name"]: p["id"] for p in players}
@@ -813,13 +828,18 @@ async def seed():
         (["Erik", "Sara", "Johan"], [5, 10, 8]),
         (["Johan", "Erik", "Anders", "Lisa"], [3, 11, 2, 7]),
     ]
-    for order, cards in sample:
+    for si, (order, cards) in enumerate(sample):
         parts_in = []
+        n = len(order)
         for idx, pname in enumerate(order):
+            is_last = idx == n - 1
             parts_in.append({"user_id": pmap[pname], "placement": idx + 1,
-                             "table_position": positions[idx], "exit_card_value": cards[idx],
-                             "exit_card_suit": suits[idx % 4]})
-        await apply_match(parts_in, [], admin["id"])
+                             "table_position": positions[idx],
+                             "exit_card_value": None if is_last else cards[idx],
+                             "exit_card_suit": None if is_last else suits[idx % 4]})
+        # Ärver alla grundregler; match 2 begränsar en grundregel (för strikethrough-demo)
+        rids = all_base_ids[:] if si != 1 else all_base_ids[1:]
+        await apply_match(parts_in, rids, admin["id"])
 
     notes = [
         ("Turn10 v1.0 – Lansering 🎴", "Ny app för vår vändtian! Konton, matcher, Elo, topplista, regler och shittalk."),

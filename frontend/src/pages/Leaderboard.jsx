@@ -2,9 +2,11 @@ import { useEffect, useState } from "react";
 import api, { formatError } from "../api";
 import Header from "../components/Header";
 import PlayerAvatar from "../components/PlayerAvatar";
-import Badges, { BADGE_META } from "../components/Badges";
+import Badges, { BADGE_META, BadgeIcon } from "../components/Badges";
+import VNeckShirt from "../components/VNeckShirt";
+import { useAuth } from "../context/AuthContext";
 import { toast } from "sonner";
-import { Loader2, ChevronUp, ChevronDown, Trophy, Shirt } from "lucide-react";
+import { Loader2, ChevronUp, ChevronDown, Trophy } from "lucide-react";
 
 const COLS = [
   { key: "rating", label: "Rating" },
@@ -80,7 +82,7 @@ export default function Leaderboard() {
         {data && rows.length > 0 && (
           <div className="flex flex-wrap gap-x-3 gap-y-1 mt-3 px-1">
             {Object.entries(BADGE_META).map(([k, v]) => (
-              <span key={k} className="text-[11px] text-slate-500">{v.emoji} {v.title}</span>
+              <span key={k} className="text-[11px] text-slate-500 inline-flex items-center gap-1"><BadgeIcon k={k} /> {v.title}</span>
             ))}
           </div>
         )}
@@ -94,7 +96,7 @@ export default function Leaderboard() {
                 <div key={h.month} className="flex items-center gap-2 p-2.5 rounded-lg bg-slate-900/60 border border-slate-800 text-xs">
                   <span className="font-mono text-slate-500 w-16">{h.month}</span>
                   {h.best_player && <span className="flex items-center gap-1 text-slate-200"><Trophy className="w-3.5 h-3.5 text-amber-400" />{h.best_player.name}</span>}
-                  {h.v_ringad && <span className="flex items-center gap-1 text-slate-400 ml-auto"><Shirt className="w-3.5 h-3.5 text-amber-400" />{h.v_ringad.name}</span>}
+                  {h.v_ringad && <span className="flex items-center gap-1 text-slate-400 ml-auto"><VNeckShirt size={14} color="#FBBF24" />{h.v_ringad.name}</span>}
                 </div>
               ))}
             </div>

@@ -2,8 +2,9 @@ import { useEffect, useState } from "react";
 import api, { formatError } from "../api";
 import { useAuth } from "../context/AuthContext";
 import PlayerAvatar from "./../components/PlayerAvatar";
+import VNeckShirt from "./../components/VNeckShirt";
 import { motion, AnimatePresence } from "framer-motion";
-import { X, Shirt, Check } from "lucide-react";
+import { X, Check } from "lucide-react";
 import { toast } from "sonner";
 
 export default function MonthlyVoteModal({ open, onClose }) {
@@ -36,7 +37,7 @@ export default function MonthlyVoteModal({ open, onClose }) {
           <motion.div initial={{ y: 300 }} animate={{ y: 0 }} exit={{ y: 300 }} onClick={(e) => e.stopPropagation()} className="w-full max-w-md bg-slate-900 border-t border-amber-500/30 rounded-t-2xl p-5 pb-8 max-h-[80vh] overflow-y-auto">
             <div className="flex items-center justify-between mb-1">
               <div className="flex items-center gap-2">
-                <Shirt className="w-6 h-6 text-amber-400" />
+                <VNeckShirt size={24} color="#FBBF24" />
                 <h3 className="text-lg font-bold text-slate-100 font-display">Månadens omröstning</h3>
               </div>
               <button data-testid="close-vote-modal" onClick={onClose}><X className="w-5 h-5 text-slate-400" /></button>

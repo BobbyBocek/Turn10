@@ -6,7 +6,8 @@ import PlayerAvatar from "../components/PlayerAvatar";
 import MonthlyVoteModal from "../components/MonthlyVoteModal";
 import { toast } from "sonner";
 import { motion } from "framer-motion";
-import { PlusCircle, ChevronRight, Trophy, Shirt, Crown, LogIn, BookOpen, History } from "lucide-react";
+import { PlusCircle, ChevronRight, Trophy, Crown, LogIn, BookOpen, History } from "lucide-react";
+import VNeckShirt from "../components/VNeckShirt";
 
 function fmtDate(iso) {
   try { return new Date(iso).toLocaleDateString("sv-SE", { day: "numeric", month: "short" }); } catch { return iso; }
@@ -77,7 +78,7 @@ export default function Home() {
             {lb?.monthly_best && <div className="text-xs text-emerald-400 font-mono">+{lb.monthly_best.total} Elo</div>}
           </div>
           <div className="p-3 rounded-xl bg-slate-900/60 border border-slate-800">
-            <div className="flex items-center gap-1 text-[11px] text-slate-400 uppercase tracking-wide mb-1"><Shirt className="w-3.5 h-3.5" /> V-ringad</div>
+            <div className="flex items-center gap-1 text-[11px] text-slate-400 uppercase tracking-wide mb-1"><VNeckShirt size={14} color="#94A3B8" /> V-ringad</div>
             <div className="font-bold text-slate-100 truncate">{lb?.v_ringad?.name || "Ingen ännu"}</div>
           </div>
         </div>
@@ -85,7 +86,7 @@ export default function Home() {
         {voteStatus && (
           <button data-testid="open-vote-banner" onClick={() => setVoteOpen(true)}
             className={`w-full flex items-center gap-3 p-3.5 rounded-xl border mb-4 text-left ${voteStatus.voted ? "bg-slate-900/60 border-slate-800" : "bg-amber-500/10 border-amber-500/40"}`}>
-            <Shirt className="w-6 h-6 text-amber-400 shrink-0" />
+            <VNeckShirt size={24} color="#FBBF24" className="shrink-0" />
             <div className="flex-1"><div className="font-semibold text-slate-100 text-sm">Månadens V-ringad-omröstning</div>
               <div className="text-xs text-slate-400">{voteStatus.voted ? "Du har röstat – tryck för att ändra" : "Du har inte röstat än"}</div></div>
             <ChevronRight className="w-4 h-4 text-slate-500" />
