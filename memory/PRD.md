@@ -33,6 +33,8 @@ guld (#F59E0B) + crimson (#E11D48) accenter.
 - Testat: backend 40/40 pytest, frontend 100% (iteration_3), inga defekter.
 - v4 (grundregler + bord): grundregler är nu riktiga valbara regelobjekt (kort-ikoner card:2/card:10) med egen sektion, förvalda men går att begränsa per match (visas överstrukna i historik om ej aktiva); drag-and-drop av spelare mellan bordsplatser (pointer events) auto-tilldelar position; matchdetalj visar bordsvy med placering + Elo-badge + utgångskort/bonus; Elo-förklaring i klarspråk på Regler-sidan; sistaplacerad väljer inget utgångskort; V-ringad-ikon = tydlig V-ringad t-shirt (SVG); patch note Beta 0.2.1.
 - Testat: backend 44/44 pytest, frontend 100% (iteration_4), inga defekter.
+- v5 (rating + interaktion): Elo-golvregel (placering i övre halvan kan aldrig ge minus på parvisa uträkningen; utgångsbonus läggs till efteråt); längre placeringsfas (hög K de första 20 matcherna istället för 10); regelbeskrivningar syns på regelkort + info-sheet vid val; slutplacering sätts med drag-and-drop (pointer events) istället för pilar; historiklistan visar övriga deltagares namn.
+- Testat: backend 47/47 pytest, frontend 100% (iteration_5), inga defekter. Golvregel verifierad live.
 
 ## Backlog (ej gjort)
 - P1: Elo-graf per spelare över tid (recharts).

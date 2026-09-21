@@ -458,6 +458,103 @@ class TestIter4:
         assert seeded and "0.2.1" in seeded[0], f"seeded ordering wrong: {seeded}"
 
 
+# --- Iteration 5: Elo floor + NEW_PLAYER_MATCHES=20 -----------------------
+class TestIter5Elo:
+    def _pick(self, sess, n):
+        users = sess.get(f"{API}/users").json()
+        return [u for u in users if u["email"] in PLAYERS][:n]
+
+    def test_new_player_matches_constant_is_20(self):
+        """elo.py has NEW_PLAYER_MATCHES=20 (was 10 in prior iterations)."""
+        import importlib.util, sys, os
+        spec = importlib.util.spec_from_file_location("elo_mod", "/app/backend/elo.py")
+        mod = importlib.util.module_from_spec(spec); spec.loader.exec_module(mod)
+        assert mod.NEW_PLAYER_MATCHES == 20
+
+    def test_elo_floor_upper_half_never_negative(self, admin_session):
+        """If a high-rated player finishes in the upper half behind a lower-rated
+        winner, their base_delta must be floored to >= 0. The last-placed player
+        (lower half) can still go negative."""
+        # Find the two players with highest and lowest current rating among PLAYERS
+        lb = admin_session.get(f"{API}/leaderboard").json()["rows"]
+        # Filter test players from leaderboard (ratings may be equal at start)
+        by_email = {r.get("email"): r for r in lb if r.get("email") in PLAYERS}
+        # Fetch users so we know user ids even if not in leaderboard
+        users = admin_session.get(f"{API}/users").json()
+        test_users = [u for u in users if u["email"] in PLAYERS]
+        # Sort by current rating desc
+        test_users_sorted = sorted(test_users, key=lambda u: -u.get("rating", 1000))
+        assert len(test_users_sorted) >= 4
+        highest = test_users_sorted[0]
+        lowest = test_users_sorted[-1]
+        middle = test_users_sorted[1:3]
+
+        # If ratings all equal, first play a match where 'highest' wins to boost them
+        if highest.get("rating", 1000) <= lowest.get("rating", 1000):
+            boost_parts = [
+                {"user_id": highest["id"], "placement": 1},
+                {"user_id": middle[0]["id"], "placement": 2},
+                {"user_id": lowest["id"], "placement": 3},
+            ]
+            r = admin_session.post(f"{API}/matches", json={"participants": boost_parts, "rule_ids": []})
+            assert r.status_code == 200, r.text
+            # Refetch users
+            users = admin_session.get(f"{API}/users").json()
+            hi = next(u for u in users if u["id"] == highest["id"])
+            lo = next(u for u in users if u["id"] == lowest["id"])
+            assert hi["rating"] > lo["rating"], "boost match should raise highest rating above lowest"
+            highest, lowest = hi, lo
+
+        # Now craft a 4-player match: lowest wins (1st), highest finishes 2nd (upper half).
+        parts = [
+            {"user_id": lowest["id"], "placement": 1},
+            {"user_id": highest["id"], "placement": 2},   # upper half (ceil(4/2)=2)
+            {"user_id": middle[0]["id"], "placement": 3}, # lower half
+            {"user_id": middle[1]["id"], "placement": 4}, # last (lower half)
+        ]
+        r = admin_session.post(f"{API}/matches", json={"participants": parts, "rule_ids": []})
+        assert r.status_code == 200, r.text
+        m = r.json()
+        pmap = {p["user_id"]: p for p in m["participants"]}
+        hi_p = pmap[highest["id"]]
+        last_p = pmap[middle[1]["id"]]
+        # Floor: elo_base_delta must be >= 0 for upper-half placement even if the
+        # pairwise math would want it negative (higher-rated lost to lower).
+        assert hi_p["elo_base_delta"] >= 0, f"upper-half base_delta must be >=0, got {hi_p['elo_base_delta']}"
+        # Last-placed player (lower half) can still be negative
+        assert last_p["elo_base_delta"] < 0, f"last place should still be negative, got {last_p['elo_base_delta']}"
+
+    def test_new_player_has_larger_swing_than_established(self, admin_session):
+        """A brand-new player (matches_played < 20) uses K_NEW=60 and gets a
+        clearly larger delta magnitude than an established player in the same match."""
+        # Register a brand new player
+        email = f"test_newk_{uuid.uuid4().hex[:6]}@test.se"
+        rr = requests.post(f"{API}/auth/register", json={"name": "NewbieK", "email": email, "password": "Hemligt1!", "invite_code": "267710"})
+        assert rr.status_code == 200, rr.text
+        new_user_id = rr.json()["id"]
+
+        # Pick 2 established players (assume seeded PLAYERS have matches_played >=20)
+        users = admin_session.get(f"{API}/users").json()
+        est = [u for u in users if u["email"] in PLAYERS and u.get("matches_played", 0) >= 20][:2]
+        if len(est) < 2:
+            pytest.skip("need at least 2 established players (matches_played>=20) to compare K-factors")
+
+        # New player wins, one established 2nd, one established 3rd (lower half only for est[1])
+        parts = [
+            {"user_id": new_user_id, "placement": 1},
+            {"user_id": est[0]["id"], "placement": 2},
+            {"user_id": est[1]["id"], "placement": 3},
+        ]
+        r = admin_session.post(f"{API}/matches", json={"participants": parts, "rule_ids": []})
+        assert r.status_code == 200, r.text
+        m = r.json()
+        pmap = {p["user_id"]: p for p in m["participants"]}
+        new_delta = abs(pmap[new_user_id]["elo_base_delta"])
+        est_last_delta = abs(pmap[est[1]["id"]]["elo_base_delta"])
+        # K_NEW=60 vs K_ESTABLISHED=20 -> new player's magnitude should be clearly larger
+        assert new_delta > est_last_delta, f"new player delta ({new_delta}) should exceed established ({est_last_delta})"
+
+
 class TestClearTestdata:
     """Endpoint exists and requires auth. DO NOT invoke it to actually clear data."""
 

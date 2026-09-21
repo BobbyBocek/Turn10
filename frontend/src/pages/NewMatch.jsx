@@ -34,6 +34,7 @@ export default function NewMatch() {
   const [ruleInfo, setRuleInfo] = useState(null);
   const rowsRef = useRef({});
   const [dragUid, setDragUid] = useState(null);
+  const dragRef = useRef(null);
 
   const idxAtY = (y) => {
     for (const uid of order) {
@@ -44,14 +45,15 @@ export default function NewMatch() {
     }
     return null;
   };
-  const onRowDown = (uid, e) => { e.currentTarget.setPointerCapture(e.pointerId); setDragUid(uid); };
+  const onRowDown = (uid, e) => { e.currentTarget.setPointerCapture(e.pointerId); dragRef.current = uid; setDragUid(uid); };
   const onRowMove = (e) => {
-    if (dragUid === null) return;
+    const dr = dragRef.current;
+    if (dr === null) return;
     const t = idxAtY(e.clientY);
-    const cur = order.indexOf(dragUid);
-    if (t !== null && t !== cur) setOrder((prev) => { const a = [...prev]; a.splice(cur, 1); a.splice(t, 0, dragUid); return a; });
+    const cur = order.indexOf(dr);
+    if (t !== null && t !== cur) setOrder((prev) => { const a = [...prev]; a.splice(cur, 1); a.splice(t, 0, dr); return a; });
   };
-  const onRowUp = () => setDragUid(null);
+  const onRowUp = () => { dragRef.current = null; setDragUid(null); };
 
   useEffect(() => {
     Promise.all([api.get("/users"), api.get("/rules"), api.get("/positions")])
