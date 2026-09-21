@@ -407,6 +407,57 @@ class TestRuleMetadata:
         admin_session.delete(f"{API}/rules/{rid}")
 
 
+# --- Iteration 4: base rules with card icons + all_base_rules + patch note ---
+class TestIter4:
+    def test_base_rules_seeded_with_card_icons(self):
+        r = requests.get(f"{API}/rules")
+        assert r.status_code == 200
+        rules = r.json()
+        base = [x for x in rules if x.get("is_base")]
+        assert len(base) >= 7, f"expected >=7 base rules, got {len(base)}"
+        icons = [x["icon"] for x in base]
+        assert "card:2" in icons and "card:10" in icons
+        # non-base tillval bucket exists
+        # is_base flag present on all
+        for x in rules:
+            assert "is_base" in x
+
+    def test_match_detail_returns_all_base_rules(self, admin_session):
+        matches = admin_session.get(f"{API}/matches").json()
+        assert matches, "seed matches expected"
+        mid = matches[0]["id"]
+        d = requests.get(f"{API}/matches/{mid}").json()
+        assert "all_base_rules" in d
+        assert isinstance(d["all_base_rules"], list)
+        assert len(d["all_base_rules"]) >= 7
+        for r in d["all_base_rules"]:
+            assert r.get("is_base") is True
+
+    def test_seeded_match_last_player_no_exit_card(self, admin_session):
+        matches = admin_session.get(f"{API}/matches").json()
+        # find one match where last placement has null exit_card_value
+        found_any = False
+        for m in matches:
+            d = admin_session.get(f"{API}/matches/{m['id']}").json()
+            last = max(d["participants"], key=lambda p: p["placement"])
+            if last["exit_card_value"] is None:
+                found_any = True
+                break
+        assert found_any, "expected at least one seeded match where last player has no exit_card_value"
+
+    def test_patch_note_beta_021_is_top(self):
+        r = requests.get(f"{API}/patch-notes")
+        assert r.status_code == 200
+        notes = r.json()
+        assert notes, "patch notes expected"
+        titles = [n.get("title", "") for n in notes]
+        # Beta 0.2.1 should exist (would be top if test_add_patch_note hadn't added a 'TEST' note in same run)
+        assert any("0.2.1" in t for t in titles), f"Beta 0.2.1 not found in: {titles}"
+        # And among seeded notes it's the newest (i.e., appears before Beta 0.2.0 in the list)
+        seeded = [t for t in titles if t.startswith("Beta")]
+        assert seeded and "0.2.1" in seeded[0], f"seeded ordering wrong: {seeded}"
+
+
 class TestClearTestdata:
     """Endpoint exists and requires auth. DO NOT invoke it to actually clear data."""
 

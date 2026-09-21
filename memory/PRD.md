@@ -31,6 +31,8 @@ guld (#F59E0B) + crimson (#E11D48) accenter.
   ny badge 📖 flest skapade regler; sökbar Lucide-ikonväljare med snabbrad kortsymboler; "Rensa testdata"-knapp (POST /admin/clear-testdata + recompute_all);
   inga exempelregler seedas längre.
 - Testat: backend 40/40 pytest, frontend 100% (iteration_3), inga defekter.
+- v4 (grundregler + bord): grundregler är nu riktiga valbara regelobjekt (kort-ikoner card:2/card:10) med egen sektion, förvalda men går att begränsa per match (visas överstrukna i historik om ej aktiva); drag-and-drop av spelare mellan bordsplatser (pointer events) auto-tilldelar position; matchdetalj visar bordsvy med placering + Elo-badge + utgångskort/bonus; Elo-förklaring i klarspråk på Regler-sidan; sistaplacerad väljer inget utgångskort; V-ringad-ikon = tydlig V-ringad t-shirt (SVG); patch note Beta 0.2.1.
+- Testat: backend 44/44 pytest, frontend 100% (iteration_4), inga defekter.
 
 ## Backlog (ej gjort)
 - P1: Elo-graf per spelare över tid (recharts).

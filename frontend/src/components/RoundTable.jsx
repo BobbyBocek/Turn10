@@ -9,6 +9,8 @@ export default function RoundTable({ players = [], onReorder, seatLabels = [] })
   const [dragIdx, setDragIdx] = useState(null);
   const [pos, setPos] = useState({ x: 0, y: 0 });
   const [hover, setHover] = useState(null);
+  const dragRef = useRef(null);
+  const hoverRef = useRef(null);
 
   const seatPct = (i) => {
     const angle = -90 + (i * 360) / Math.max(n, 1);
@@ -32,21 +34,26 @@ export default function RoundTable({ players = [], onReorder, seatLabels = [] })
   const onDown = (i, e) => {
     if (!onReorder) return;
     e.currentTarget.setPointerCapture(e.pointerId);
+    dragRef.current = i; hoverRef.current = i;
     setDragIdx(i);
     setPos({ x: e.clientX, y: e.clientY });
     setHover(i);
   };
   const onMove = (e) => {
-    if (dragIdx === null) return;
+    if (dragRef.current === null) return;
     setPos({ x: e.clientX, y: e.clientY });
-    setHover(nearestSeat(e.clientX, e.clientY));
+    const nearest = nearestSeat(e.clientX, e.clientY);
+    hoverRef.current = nearest;
+    setHover(nearest);
   };
   const onUp = () => {
-    if (dragIdx !== null && hover !== null && hover !== dragIdx) {
+    const di = dragRef.current, hi = hoverRef.current;
+    if (di !== null && hi !== null && hi !== di) {
       const arr = players.map((p) => p.id);
-      [arr[dragIdx], arr[hover]] = [arr[hover], arr[dragIdx]];
+      [arr[di], arr[hi]] = [arr[hi], arr[di]];
       onReorder(arr);
     }
+    dragRef.current = null; hoverRef.current = null;
     setDragIdx(null); setHover(null);
   };
 
