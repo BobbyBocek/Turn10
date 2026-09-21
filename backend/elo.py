@@ -2,6 +2,7 @@
 
 Alla justerbara konstanter ligger här på ett ställe.
 """
+import math
 
 # --- Justerbara konstanter -------------------------------------------------
 START_RATING = 1000
@@ -10,7 +11,7 @@ K_NEW = 60
 K_ESTABLISHED = 20
 K_ELITE = 15
 
-NEW_PLAYER_MATCHES = 10
+NEW_PLAYER_MATCHES = 20  # längre placeringsfas: de första 20 matcherna svänger mer
 ELITE_THRESHOLD = 2000
 
 # Vinststreak-bonus (förstärker): K_eff = K_bas * (1 + 0.15 * min(streak-1, 5))
@@ -92,6 +93,13 @@ def compute_match_elo(players):
             k_eff = k_base * max(1 - LOSS_STREAK_STEP * steps, LOSS_STREAK_FLOOR)
 
         base_delta = round(k_eff * raw)
+
+        # Golvregel: presterar du bättre än eller lika med halva fältet kan
+        # själva parvisa uträkningen aldrig ge minus (utgångsbonus läggs till efteråt).
+        upper_half = math.ceil(n / 2)
+        if x["placement"] <= upper_half and base_delta < 0:
+            base_delta = 0
+
         results.append({
             "user_id": x["user_id"],
             "elo_before": x["rating"],

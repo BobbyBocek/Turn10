@@ -36,6 +36,7 @@ export default function History() {
               <PlayerAvatar icon={winner?.icon} name={winner?.name} size={42} />
               <div className="flex-1 min-w-0">
                 <div className="font-semibold text-slate-100 truncate flex items-center gap-1"><Crown className="w-4 h-4 text-amber-400" /> {m.winner_name}</div>
+                <div className="text-[11px] text-slate-400 truncate mt-0.5">{m.participants.map((p) => p.name).join(", ")}</div>
                 <div className="text-xs text-slate-500 flex items-center gap-3 mt-0.5">
                   <span>{fmtDate(m.date)}</span>
                   <span className="flex items-center gap-1"><Users className="w-3 h-3" />{m.player_count}</span>

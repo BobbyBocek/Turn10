@@ -1,4 +1,4 @@
-import { useEffect, useState } from "react";
+import { useEffect, useState, useRef } from "react";
 import { useNavigate, useLocation } from "react-router-dom";
 import api, { formatError } from "../api";
 import Header from "../components/Header";
@@ -11,7 +11,7 @@ import RuleFormModal from "../components/RuleFormModal";
 import { catMeta } from "../components/ruleCategory";
 import { toast } from "sonner";
 import { motion, AnimatePresence } from "framer-motion";
-import { Check, ChevronRight, ChevronLeft, Plus, Crown, Loader2, Search } from "lucide-react";
+import { Check, ChevronRight, ChevronLeft, Plus, Crown, Loader2, Search, Info, GripVertical, X } from "lucide-react";
 
 export default function NewMatch() {
   const navigate = useNavigate();
@@ -31,6 +31,27 @@ export default function NewMatch() {
   const [saving, setSaving] = useState(false);
   const [ruleModal, setRuleModal] = useState(false);
   const [picker, setPicker] = useState({ open: false, uid: null });
+  const [ruleInfo, setRuleInfo] = useState(null);
+  const rowsRef = useRef({});
+  const [dragUid, setDragUid] = useState(null);
+
+  const idxAtY = (y) => {
+    for (const uid of order) {
+      const el = rowsRef.current[uid];
+      if (!el) continue;
+      const r = el.getBoundingClientRect();
+      if (y >= r.top && y <= r.bottom) return order.indexOf(uid);
+    }
+    return null;
+  };
+  const onRowDown = (uid, e) => { e.currentTarget.setPointerCapture(e.pointerId); setDragUid(uid); };
+  const onRowMove = (e) => {
+    if (dragUid === null) return;
+    const t = idxAtY(e.clientY);
+    const cur = order.indexOf(dragUid);
+    if (t !== null && t !== cur) setOrder((prev) => { const a = [...prev]; a.splice(cur, 1); a.splice(t, 0, dragUid); return a; });
+  };
+  const onRowUp = () => setDragUid(null);
 
   useEffect(() => {
     Promise.all([api.get("/users"), api.get("/rules"), api.get("/positions")])
@@ -62,7 +83,6 @@ export default function NewMatch() {
   const reorder = (ids) => setSelected((prev) => ids.map((id) => prev.find((p) => p.user_id === id)));
 
   const goToOrder = () => { setOrder(selected.map((s) => s.user_id)); setStep(3); };
-  const move = (idx, dir) => setOrder((prev) => { const a = [...prev]; const j = idx + dir; if (j < 0 || j >= a.length) return prev; [a[idx], a[j]] = [a[j], a[idx]]; return a; });
 
   const createCustomRule = async (payload) => {
     try {
@@ -107,11 +127,14 @@ export default function NewMatch() {
         const cm = catMeta(r.category);
         return (
           <motion.button key={r.id} data-testid={`rule-card-toggle-${r.id}`} whileTap={{ scale: 0.92 }} onClick={() => toggleRule(r.id)}
-            className="relative flex flex-col items-center justify-start p-2 rounded-xl border-2 min-h-[92px] transition-all"
+            className="relative flex flex-col items-center justify-start p-2 pt-5 rounded-xl border-2 min-h-[108px] transition-all"
             style={active ? { borderColor: cm.color, background: `${cm.color}22`, boxShadow: `0 0 12px ${cm.color}55` } : { borderColor: "#334155", background: "#1e293b80" }}>
+            <div role="button" data-testid={`rule-info-${r.id}`} onClick={(e) => { e.stopPropagation(); setRuleInfo(r); }}
+              className="absolute top-1 left-1 w-4 h-4 rounded-full bg-slate-950/60 flex items-center justify-center"><Info className="w-3 h-3 text-slate-300" /></div>
             {active && <div className="absolute top-1 right-1 w-4 h-4 rounded-full flex items-center justify-center" style={{ background: cm.color }}><Check className="w-3 h-3 text-slate-950" /></div>}
-            <RuleIcon name={r.icon} className="w-6 h-6 mt-1 mb-1" style={active ? { color: cm.color } : { color: "#94a3b8" }} />
+            <RuleIcon name={r.icon} className="w-6 h-6 mb-1" style={active ? { color: cm.color } : { color: "#94a3b8" }} />
             <span className={`text-[10px] leading-tight text-center font-medium ${active ? "text-slate-100" : "text-slate-400"}`}>{r.name}</span>
+            {r.description && <span className="text-[8px] leading-tight text-center text-slate-500 line-clamp-2 mt-0.5">{r.description}</span>}
           </motion.button>
         );
       })}
@@ -194,7 +217,8 @@ export default function NewMatch() {
                   const isLast = idx === order.length - 1;
                   const c = cards[uid];
                   return (
-                    <div key={uid} data-testid={`placement-row-${uid}`} className={`flex items-center gap-2 p-2.5 rounded-xl border ${isWinner ? "bg-amber-500/10 border-amber-500/40" : "bg-slate-900/60 border-slate-800"}`}>
+                    <div key={uid} ref={(el) => { rowsRef.current[uid] = el; }} data-testid={`placement-row-${uid}`}
+                      className={`flex items-center gap-2 p-2.5 rounded-xl border transition-all ${isWinner ? "bg-amber-500/10 border-amber-500/40" : "bg-slate-900/60 border-slate-800"} ${dragUid === uid ? "ring-2 ring-amber-400 opacity-80" : ""}`}>
                       <div className={`w-7 h-7 rounded-lg flex items-center justify-center font-bold font-mono text-sm ${isWinner ? "bg-amber-500 text-slate-950" : "bg-slate-800 text-slate-300"}`}>{isWinner ? <Crown className="w-4 h-4" /> : idx + 1}</div>
                       <PlayerAvatar icon={s?.icon} name={s?.name} size={34} />
                       <div className="flex-1 min-w-0"><div className="font-medium text-slate-100 truncate">{s?.name}</div></div>
@@ -205,9 +229,9 @@ export default function NewMatch() {
                           {c ? <PlayingCard value={c.value} suit={c.suit} size="sm" /> : <div className="w-[34px] h-[48px] rounded-md border-2 border-dashed border-slate-600 flex items-center justify-center text-[8px] text-slate-500 text-center leading-tight">Välj kort</div>}
                         </button>
                       )}
-                      <div className="flex flex-col gap-1">
-                        <button data-testid={`move-up-${uid}`} onClick={() => move(idx, -1)} disabled={idx === 0} className="w-7 h-6 rounded bg-slate-800 disabled:opacity-30 flex items-center justify-center"><ChevronLeft className="w-4 h-4 rotate-90 text-slate-300" /></button>
-                        <button data-testid={`move-down-${uid}`} onClick={() => move(idx, 1)} disabled={idx === order.length - 1} className="w-7 h-6 rounded bg-slate-800 disabled:opacity-30 flex items-center justify-center"><ChevronRight className="w-4 h-4 rotate-90 text-slate-300" /></button>
+                      <div data-testid={`drag-handle-${uid}`} onPointerDown={(e) => onRowDown(uid, e)} onPointerMove={onRowMove} onPointerUp={onRowUp}
+                        className="w-9 h-11 rounded bg-slate-800 flex items-center justify-center cursor-grab active:cursor-grabbing touch-none">
+                        <GripVertical className="w-4 h-4 text-slate-300" />
                       </div>
                     </div>
                   );
@@ -227,6 +251,29 @@ export default function NewMatch() {
       <CardPicker open={picker.open} initial={cards[picker.uid]} onClose={() => setPicker({ open: false, uid: null })}
         onSelect={(card) => setCards((prev) => ({ ...prev, [picker.uid]: card }))} />
       <RuleFormModal open={ruleModal} onClose={() => setRuleModal(false)} onSubmit={createCustomRule} />
+
+      {/* Regelbeskrivning */}
+      <AnimatePresence>
+        {ruleInfo && (
+          <motion.div initial={{ opacity: 0 }} animate={{ opacity: 1 }} exit={{ opacity: 0 }} className="fixed inset-0 z-[70] bg-black/70 flex items-end justify-center" onClick={() => setRuleInfo(null)}>
+            <motion.div initial={{ y: 200 }} animate={{ y: 0 }} exit={{ y: 200 }} onClick={(e) => e.stopPropagation()} className="w-full max-w-md bg-slate-900 border-t border-amber-500/30 rounded-t-2xl p-5 pb-8">
+              <div className="flex items-start justify-between mb-3">
+                <div className="flex items-center gap-3">
+                  <div className="w-11 h-11 rounded-lg flex items-center justify-center shrink-0" style={{ background: `${catMeta(ruleInfo.category).color}22` }}>
+                    <RuleIcon name={ruleInfo.icon} className="w-6 h-6" style={{ color: catMeta(ruleInfo.category).color }} />
+                  </div>
+                  <div>
+                    <h3 className="text-lg font-semibold text-slate-100 font-display">{ruleInfo.name}</h3>
+                    <span className="text-[11px] px-1.5 py-0.5 rounded-full font-medium" style={{ background: `${catMeta(ruleInfo.category).color}22`, color: catMeta(ruleInfo.category).color }}>{catMeta(ruleInfo.category).label}</span>
+                  </div>
+                </div>
+                <button data-testid="close-rule-info" onClick={() => setRuleInfo(null)}><X className="w-5 h-5 text-slate-400" /></button>
+              </div>
+              <p className="text-sm text-slate-300 leading-relaxed">{ruleInfo.description || "Ingen beskrivning."}</p>
+            </motion.div>
+          </motion.div>
+        )}
+      </AnimatePresence>
     </div>
   );
 }
