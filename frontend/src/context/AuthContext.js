@@ -1,5 +1,5 @@
 import { createContext, useContext, useEffect, useState, useCallback } from "react";
-import api from "../api";
+import api, { setToken } from "../api";
 
 const AuthContext = createContext(null);
 
@@ -10,7 +10,8 @@ export function AuthProvider({ children }) {
     try {
       const { data } = await api.get("/auth/me");
       setUser(data);
-    } catch {
+    } catch (e) {
+      if (e.response?.status === 401) setToken(null); // ogiltig/utgången token
       setUser(false);
     }
   }, []);
@@ -32,6 +33,7 @@ export function AuthProvider({ children }) {
 
   const logout = async () => {
     try { await api.post("/auth/logout"); } catch {}
+    setToken(null);
     setUser(false);
   };
 

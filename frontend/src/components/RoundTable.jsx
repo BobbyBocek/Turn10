@@ -58,6 +58,7 @@ export default function RoundTable({ players = [], onReorder, seatLabels = [] })
   };
 
   const r = ref.current?.getBoundingClientRect();
+  const dense = n > 6; // 7–8 spelare: mindre avatarer så ingen krockar
 
   return (
     <div ref={ref} className="relative w-full max-w-[300px] mx-auto aspect-square my-2 select-none touch-none" data-testid="round-table">
@@ -76,8 +77,8 @@ export default function RoundTable({ players = [], onReorder, seatLabels = [] })
           <div key={p.id} data-testid={`round-table-avatar-${p.id}`} onPointerDown={(e) => onDown(i, e)} onPointerMove={onMove} onPointerUp={onUp}
             className={`absolute flex flex-col items-center -translate-x-1/2 -translate-y-1/2 ${onReorder ? "cursor-grab active:cursor-grabbing" : ""} ${isDragging ? "scale-110" : "transition-all"}`}
             style={style}>
-            <PlayerAvatar icon={p.icon} name={p.name} size={42} ring={isHover} />
-            <span className="text-[10px] text-slate-300 mt-0.5 max-w-[62px] truncate">{p.name}</span>
+            <PlayerAvatar icon={p.icon} name={p.name} size={dense ? 36 : 42} ring={isHover} />
+            <span className={`text-[10px] text-slate-300 mt-0.5 truncate ${dense ? "max-w-[52px]" : "max-w-[62px]"}`}>{p.name}</span>
             {seatLabels[i] && <span className={`text-[8px] mt-0.5 px-1 rounded ${isHover ? "text-amber-200 bg-amber-500/30" : "text-amber-300/80 bg-amber-500/10"}`}>{seatLabels[i]}</span>}
           </div>
         );

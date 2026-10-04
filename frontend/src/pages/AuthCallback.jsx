@@ -1,7 +1,7 @@
 import { useEffect, useRef } from "react";
 import { useNavigate } from "react-router-dom";
 import { useAuth } from "../context/AuthContext";
-import api from "../api";
+import api, { setToken } from "../api";
 import { Loader2 } from "lucide-react";
 
 export default function AuthCallback() {
@@ -19,7 +19,9 @@ export default function AuthCallback() {
       try {
         const { data } = await api.post("/auth/google-session", {}, { headers: { "X-Session-ID": sessionId } });
         window.history.replaceState(null, "", "/");
-        setUser(data);
+        const { token, ...loggedIn } = data;
+        setToken(token);
+        setUser(loggedIn);
         navigate("/", { replace: true });
       } catch {
         navigate("/login", { replace: true });

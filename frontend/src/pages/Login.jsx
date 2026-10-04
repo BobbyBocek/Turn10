@@ -1,7 +1,7 @@
 import { useState, useEffect } from "react";
 import { useNavigate } from "react-router-dom";
 import { useAuth } from "../context/AuthContext";
-import api, { formatError } from "../api";
+import api, { formatError, setToken } from "../api";
 import { Loader2, Trophy, BookOpen, History } from "lucide-react";
 import { toast } from "sonner";
 
@@ -24,7 +24,9 @@ export default function Login() {
       const endpoint = mode === "login" ? "/auth/login" : "/auth/register";
       const body = mode === "login" ? { email, password } : { name, email, password, invite_code: inviteCode };
       const { data } = await api.post(endpoint, body);
-      setUser(data);
+      const { token, ...loggedIn } = data;
+      setToken(token);
+      setUser(loggedIn);
       navigate("/", { replace: true });
     } catch (err) {
       toast.error(formatError(err.response?.data?.detail) || err.message);

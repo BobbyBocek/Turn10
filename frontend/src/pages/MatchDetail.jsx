@@ -9,7 +9,7 @@ import MatchRoundTable from "../components/MatchRoundTable";
 import { useAuth } from "../context/AuthContext";
 import { toast } from "sonner";
 import { motion } from "framer-motion";
-import { Crown, Send, Loader2, ArrowUp, ArrowDown, Minus, RotateCw } from "lucide-react";
+import { Crown, Send, Loader2, ArrowUp, ArrowDown, Minus, RotateCw, Pencil, Trash2 } from "lucide-react";
 
 const QUICK_EMOJIS = ["🔥", "💩", "🤡", "👑", "🎯", "🚀", "😭", "🍺"];
 
@@ -55,6 +55,15 @@ export default function MatchDetail() {
     navigate("/ny-match", { state: { players, ruleIds: match.rule_ids } });
   };
 
+  const deleteMatch = async () => {
+    if (!window.confirm("Ta bort hela matchen? Dess kommentarer tas också bort och Elo räknas om för alla senare matcher. En säkerhetskopia sparas.")) return;
+    try {
+      await api.delete(`/matches/${id}`);
+      toast.success("Matchen är borttagen");
+      navigate("/historik", { replace: true });
+    } catch (e) { toast.error(formatError(e.response?.data?.detail)); }
+  };
+
   if (!match) return <div className="flex justify-center py-20"><Loader2 className="w-6 h-6 text-amber-400 animate-spin" /></div>;
 
   return (
@@ -62,6 +71,13 @@ export default function MatchDetail() {
       <Header title="Matchdetaljer" subtitle={fmtDateTime(match.date)}
         right={user ? <button data-testid="play-again-button" onClick={playAgain} className="flex items-center gap-1 px-3 py-2 rounded-lg bg-amber-500 text-slate-950 text-xs font-bold active:scale-95 transition-transform"><RotateCw className="w-4 h-4" /> Spela igen</button> : undefined} />
       <div className="px-4 py-4 space-y-5">
+        {user?.is_admin && (
+          <div data-testid="admin-bar" className="flex gap-2 p-2.5 rounded-xl bg-violet-500/10 border border-violet-500/30">
+            <span className="text-[10px] uppercase tracking-wider text-violet-300 font-mono self-center mr-auto">Admin</span>
+            <button data-testid="admin-edit-button" onClick={() => navigate(`/match/${id}/redigera`)} className="flex items-center gap-1 px-3 py-2 rounded-lg bg-violet-500 text-white text-xs font-bold active:scale-95 transition-transform"><Pencil className="w-3.5 h-3.5" /> Redigera</button>
+            <button data-testid="admin-delete-button" onClick={deleteMatch} className="flex items-center gap-1 px-3 py-2 rounded-lg bg-rose-500/20 border border-rose-500/40 text-rose-300 text-xs font-bold active:scale-95 transition-transform"><Trash2 className="w-3.5 h-3.5" /> Ta bort</button>
+          </div>
+        )}
         {/* Bordsvy: placering, Elo & utgångskort */}
         <MatchRoundTable participants={match.participants} />
 

@@ -11,7 +11,16 @@ import RuleFormModal from "../components/RuleFormModal";
 import { catMeta } from "../components/ruleCategory";
 import { toast } from "sonner";
 import { motion, AnimatePresence } from "framer-motion";
-import { Check, ChevronRight, ChevronLeft, Plus, Crown, Loader2, Search, Info, GripVertical, X } from "lucide-react";
+import { Check, ChevronRight, ChevronLeft, Plus, Crown, Loader2, Search, Info, GripVertical, X, Dices } from "lucide-react";
+
+const MAX_PLAYERS = 8;
+const MIN_PLAYERS = 3;
+
+function shuffled(list) {
+  const a = [...list];
+  for (let i = a.length - 1; i > 0; i--) { const j = Math.floor(Math.random() * (i + 1)); [a[i], a[j]] = [a[j], a[i]]; }
+  return a;
+}
 
 export default function NewMatch() {
   const navigate = useNavigate();
@@ -77,7 +86,7 @@ export default function NewMatch() {
   const toggleUser = (u) => {
     setSelected((prev) => {
       if (prev.find((p) => p.user_id === u.id)) return prev.filter((p) => p.user_id !== u.id);
-      if (prev.length >= 6) { toast.error("Max 6 spelare"); return prev; }
+      if (prev.length >= MAX_PLAYERS) { toast.error(`Max ${MAX_PLAYERS} spelare`); return prev; }
       return [...prev, { user_id: u.id, name: u.display_name, icon: u.icon }];
     });
   };
@@ -122,6 +131,16 @@ export default function NewMatch() {
   const baseRules = rules.filter((r) => r.is_base);
   const optionalRules = rules.filter((r) => !r.is_base);
 
+  // Slumpar 1–3 av de egengjorda reglerna (aldrig grundreglerna, de rörs inte).
+  const randomizeRules = () => {
+    if (optionalRules.length === 0) { toast.error("Det finns inga egna regler att slumpa bland ännu."); return; }
+    const count = Math.min(optionalRules.length, 1 + Math.floor(Math.random() * 3));
+    const picked = shuffled(optionalRules).slice(0, count);
+    const optionalIds = new Set(optionalRules.map((r) => r.id));
+    setActiveRuleIds((prev) => [...prev.filter((id) => !optionalIds.has(id)), ...picked.map((r) => r.id)]);
+    toast.success(`🎲 Slumpade: ${picked.map((r) => r.name).join(", ")}`);
+  };
+
   const RuleGrid = ({ list }) => (
     <div className="grid grid-cols-3 gap-2.5">
       {list.map((r) => {
@@ -156,7 +175,7 @@ export default function NewMatch() {
               <p className="text-center text-xs text-slate-500 mb-3 -mt-1">Dra en spelare till en annan plats för att byta bordsposition.</p>
               <div className="flex items-center gap-2 mb-3">
                 <h2 className="text-lg font-semibold text-slate-200">Välj deltagare</h2>
-                <span className="text-xs px-2 py-0.5 rounded-full bg-amber-500/15 text-amber-400 font-mono">{selected.length}/6</span>
+                <span className="text-xs px-2 py-0.5 rounded-full bg-amber-500/15 text-amber-400 font-mono">{selected.length}/{MAX_PLAYERS}</span>
               </div>
               <div className="relative mb-3">
                 <Search className="w-4 h-4 text-slate-500 absolute left-3 top-1/2 -translate-y-1/2" />
@@ -180,7 +199,7 @@ export default function NewMatch() {
                   );
                 })}
               </div>
-              <button data-testid="step1-next-button" onClick={() => (selected.length >= 3 ? setStep(2) : toast.error("Minst 3 spelare krävs"))}
+              <button data-testid="step1-next-button" onClick={() => (selected.length >= MIN_PLAYERS ? setStep(2) : toast.error(`Minst ${MIN_PLAYERS} spelare krävs`))}
                 className="w-full mt-5 py-3.5 rounded-xl bg-amber-500 text-slate-950 font-bold flex items-center justify-center gap-1 active:scale-[0.98] transition-transform">
                 Fortsätt <ChevronRight className="w-5 h-5" />
               </button>
@@ -197,9 +216,12 @@ export default function NewMatch() {
 
               <div className="flex items-center justify-between mb-2">
                 <h2 className="text-base font-bold font-display text-slate-100">Tillval</h2>
-                <button data-testid="add-rule-button" onClick={() => setRuleModal(true)} className="flex items-center gap-1 text-amber-400 text-sm font-medium"><Plus className="w-4 h-4" /> Ny regel</button>
+                <div className="flex items-center gap-3">
+                  <button data-testid="random-rules-button" onClick={randomizeRules} className="flex items-center gap-1 px-2.5 py-1.5 rounded-lg bg-violet-500/15 border border-violet-500/40 text-violet-300 text-sm font-medium active:scale-95 transition-transform"><Dices className="w-4 h-4" /> Slumpa</button>
+                  <button data-testid="add-rule-button" onClick={() => setRuleModal(true)} className="flex items-center gap-1 text-amber-400 text-sm font-medium"><Plus className="w-4 h-4" /> Ny regel</button>
+                </div>
               </div>
-              {optionalRules.length === 0 ? <p className="text-sm text-slate-500">Inga tillval ännu – tryck "Ny regel".</p> : <RuleGrid list={optionalRules} />}
+              {optionalRules.length === 0 ? <p className="text-sm text-slate-500">Inga tillval ännu – tryck "Ny regel".</p> : <><p className="text-[11px] text-slate-500 mb-2">Slumpa väljer 1–3 av era egna regler åt dig (aldrig grundreglerna).</p><RuleGrid list={optionalRules} /></>}
 
               <div className="flex gap-2 mt-6">
                 <button data-testid="step2-back-button" onClick={() => setStep(1)} className="py-3.5 px-4 rounded-xl bg-slate-800 text-slate-300 font-semibold flex items-center gap-1"><ChevronLeft className="w-5 h-5" /> Tillbaka</button>

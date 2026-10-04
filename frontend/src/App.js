@@ -11,6 +11,7 @@ import Home from "./pages/Home";
 import NewMatch from "./pages/NewMatch";
 import History from "./pages/History";
 import MatchDetail from "./pages/MatchDetail";
+import EditMatch from "./pages/EditMatch";
 import Leaderboard from "./pages/Leaderboard";
 import Rules from "./pages/Rules";
 import Profile from "./pages/Profile";
@@ -58,6 +59,7 @@ function AppRouter() {
         <Route path="/patchnotes" element={<PatchNotes />} />
         {/* Kräver inloggning */}
         <Route path="/ny-match" element={<RequireAuth><NewMatch /></RequireAuth>} />
+        <Route path="/match/:id/redigera" element={<RequireAuth><EditMatch /></RequireAuth>} />
         <Route path="/min-sida" element={<RequireAuth><Profile /></RequireAuth>} />
       </Route>
       <Route path="*" element={<Navigate to="/" replace />} />

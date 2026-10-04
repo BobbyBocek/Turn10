@@ -29,6 +29,11 @@ db = client[os.environ['DB_NAME']]
 JWT_SECRET = os.environ['JWT_SECRET']
 JWT_ALG = "HS256"
 INVITE_CODE = os.environ.get("INVITE_CODE", "267710")
+MIN_PLAYERS = 3
+MAX_PLAYERS = 8
+TOKEN_DAYS = 30
+# Admin: kommaseparerad lista med e-postadresser (kan ändras via miljövariabel ADMIN_EMAILS på Render)
+ADMIN_EMAILS = {e.strip().lower() for e in os.environ.get("ADMIN_EMAILS", "tom.jenssen@live.se").split(",") if e.strip()}
 EMERGENT_SESSION_URL = "https://demobackend.emergentagent.com/auth/v1/env/oauth/session-data"
 
 app = FastAPI()
@@ -64,12 +69,16 @@ def verify_password(pw: str, hashed: str) -> bool:
 
 def create_access_token(user_id: str) -> str:
     payload = {"sub": user_id, "type": "access",
-               "exp": datetime.now(timezone.utc) + timedelta(days=7)}
+               "exp": datetime.now(timezone.utc) + timedelta(days=TOKEN_DAYS)}
     return jwt.encode(payload, JWT_SECRET, algorithm=JWT_ALG)
 
 
 def default_icon(name: str) -> dict:
     return {"bg": "#334155", "symbol": (name or "?")[0].upper()}
+
+
+def is_admin(u) -> bool:
+    return bool(u) and (u.get("email") or "").lower() in ADMIN_EMAILS
 
 
 def public_user(u: dict) -> dict:
@@ -93,6 +102,7 @@ def public_user(u: dict) -> dict:
         "loss_streak": u.get("loss_streak", 0),
         "max_win_streak": u.get("max_win_streak", 0),
         "created_at": u.get("created_at"),
+        "is_admin": is_admin(u),
     }
 
 
@@ -222,8 +232,11 @@ async def register(data: RegisterInput, response: Response):
         "created_at": now_iso(),
     }
     await db.users.insert_one(user)
-    set_auth_cookie(response, "access_token", create_access_token(user["id"]), 604800)
-    return public_user(user)
+    token = create_access_token(user["id"])
+    set_auth_cookie(response, "access_token", token, TOKEN_DAYS * 86400)
+    # token skickas även i svaret: Safari/iPhone blockerar cookies mellan turn10.se och backend,
+    # så appen sparar token lokalt och skickar den som Authorization-header.
+    return {**public_user(user), "token": token}
 
 
 @api.post("/auth/login")
@@ -232,8 +245,9 @@ async def login(data: LoginInput, response: Response):
     user = await db.users.find_one({"email": email}, {"_id": 0})
     if not user or not user.get("password_hash") or not verify_password(data.password, user["password_hash"]):
         raise HTTPException(status_code=401, detail="Fel e-post eller lösenord")
-    set_auth_cookie(response, "access_token", create_access_token(user["id"]), 604800)
-    return public_user(user)
+    token = create_access_token(user["id"])
+    set_auth_cookie(response, "access_token", token, TOKEN_DAYS * 86400)
+    return {**public_user(user), "token": token}
 
 
 @api.post("/auth/google-session")
@@ -265,7 +279,7 @@ async def google_session(request: Request, response: Response):
         "created_at": now_iso(),
     })
     set_auth_cookie(response, "session_token", session_token, 604800)
-    return public_user(user)
+    return {**public_user(user), "token": session_token}
 
 
 @api.get("/auth/me")
@@ -353,7 +367,7 @@ async def update_rule(rule_id: str, data: RuleInput, user: dict = Depends(get_cu
     rule = await db.rules.find_one({"id": rule_id}, {"_id": 0})
     if not rule:
         raise HTTPException(status_code=404, detail="Regeln hittades inte")
-    if rule.get("created_by") != user["id"]:
+    if rule.get("created_by") != user["id"] and not is_admin(user):
         raise HTTPException(status_code=403, detail="Du kan bara redigera regler du själv skapat")
     await db.rules.update_one({"id": rule_id}, {"$set": {
         "name": data.name.strip(), "description": data.description or "",
@@ -366,7 +380,7 @@ async def delete_rule(rule_id: str, user: dict = Depends(get_current_user)):
     rule = await db.rules.find_one({"id": rule_id}, {"_id": 0})
     if not rule:
         raise HTTPException(status_code=404, detail="Regeln hittades inte")
-    if rule.get("created_by") != user["id"]:
+    if rule.get("created_by") != user["id"] and not is_admin(user):
         raise HTTPException(status_code=403, detail="Du kan bara ta bort regler du själv skapat")
     await db.rules.delete_one({"id": rule_id})
     return {"ok": True}
@@ -445,16 +459,20 @@ async def apply_match(parts, rule_ids, creator_id, date=None):
     return match_doc
 
 
-@api.post("/matches")
-async def create_match(data: MatchInput, user: dict = Depends(get_current_user)):
-    parts = data.participants
+def validate_participants(parts):
     n = len(parts)
-    if n < 3 or n > 6:
-        raise HTTPException(status_code=400, detail="En match kräver 3–6 deltagare")
+    if n < MIN_PLAYERS or n > MAX_PLAYERS:
+        raise HTTPException(status_code=400, detail=f"En match kräver {MIN_PLAYERS}–{MAX_PLAYERS} deltagare")
     if sorted(p.placement for p in parts) != list(range(1, n + 1)):
         raise HTTPException(status_code=400, detail="Slutplaceringarna måste vara unika (1 till N)")
     if len({p.user_id for p in parts}) != n:
         raise HTTPException(status_code=400, detail="En spelare kan bara delta en gång")
+
+
+@api.post("/matches")
+async def create_match(data: MatchInput, user: dict = Depends(get_current_user)):
+    parts = data.participants
+    validate_participants(parts)
     match_doc = await apply_match([p.model_dump() for p in parts], data.rule_ids, user["id"], data.date)
     return await build_match_summary(match_doc)
 
@@ -734,6 +752,140 @@ async def clear_testdata(user: dict = Depends(get_current_user)):
     return {"removed_players": len(ids), "removed_matches": len(match_ids)}
 
 
+# --- Admin: redigera / ta bort matcher i efterhand ------------------------
+class MatchEditInput(BaseModel):
+    participants: List[ParticipantInput]
+    rule_ids: List[str] = []
+
+
+async def require_admin(user: dict = Depends(get_current_user)) -> dict:
+    if not is_admin(user):
+        raise HTTPException(status_code=403, detail="Endast admin kan göra det här")
+    return user
+
+
+def match_key(m: dict):
+    """Kronologisk sorteringsnyckel – samma ordning som matcherna spelades i."""
+    return (m.get("date") or "", m.get("created_at") or "")
+
+
+STAT_FIELDS = ("rating", "matches_played", "wins", "losses", "last_places",
+               "win_streak", "loss_streak", "max_win_streak")
+
+
+def fresh_stats() -> dict:
+    return {"rating": elo.START_RATING, "matches_played": 0, "wins": 0, "losses": 0,
+            "last_places": 0, "win_streak": 0, "loss_streak": 0, "max_win_streak": 0}
+
+
+async def make_backup(action: str, match_id: str, by: str):
+    """Säkerhetskopia innan en admin-ändring: alla matcher + spelarnas statistik + matchens kommentarer."""
+    users = await db.users.find({}, {"_id": 0, "id": 1, **{f: 1 for f in STAT_FIELDS}}).to_list(5000)
+    matches = await db.matches.find({}, {"_id": 0}).to_list(20000)
+    comments = await db.comments.find({"match_id": match_id}, {"_id": 0}).to_list(5000)
+    await db.admin_backups.insert_one({
+        "id": str(uuid.uuid4()), "created_at": now_iso(), "action": action,
+        "match_id": match_id, "by": by, "users": users, "matches": matches, "comments": comments,
+    })
+    # behåll de 30 senaste säkerhetskopiorna
+    old = await db.admin_backups.find({}, {"_id": 1}).sort("created_at", -1).skip(30).to_list(1000)
+    if old:
+        await db.admin_backups.delete_many({"_id": {"$in": [o["_id"] for o in old]}})
+
+
+async def replay_matches(start_key):
+    """Räkna om Elo/statistik från och med en viss match och framåt.
+
+    Matcher FÖRE start_key lämnas helt orörda – deras sparade resultat återanvänds som de är
+    (så äldre historik aldrig ändras av en admin-ändring längre fram).
+    """
+    users = await db.users.find({}, {"_id": 0, "id": 1}).to_list(5000)
+    state = {u["id"]: fresh_stats() for u in users}
+    matches = sorted(await db.matches.find({}, {"_id": 0}).to_list(20000), key=match_key)
+    for m in matches:
+        parts = sorted(m["participants"], key=lambda p: p["placement"])
+        n = len(parts)
+        for p in parts:
+            state.setdefault(p["user_id"], fresh_stats())
+        frozen = start_key is not None and match_key(m) < start_key
+        changes = {}
+        if not frozen:
+            elo_input = [{
+                "user_id": p["user_id"], "rating": state[p["user_id"]]["rating"],
+                "matches_played": state[p["user_id"]]["matches_played"],
+                "win_streak": state[p["user_id"]]["win_streak"],
+                "loss_streak": state[p["user_id"]]["loss_streak"],
+                "placement": p["placement"],
+            } for p in parts]
+            changes = {c["user_id"]: c for c in elo.compute_match_elo(elo_input)}
+        new_parts = []
+        for p in parts:
+            st = state[p["user_id"]]
+            is_win = p["placement"] == 1
+            is_last = p["placement"] == n
+            if frozen:
+                after = p.get("elo_after", st["rating"] + p.get("elo_delta", 0))
+                new_win = st["win_streak"] + 1 if is_win else 0
+                new_loss = 0 if is_win else st["loss_streak"] + 1
+                new_parts.append(p)
+            else:
+                c = changes[p["user_id"]]
+                bonus = elo.exit_bonus(p.get("exit_card_value"))
+                total = c["base_delta"] + bonus
+                after = c["elo_before"] + total
+                new_win, new_loss = c["new_win_streak"], c["new_loss_streak"]
+                new_parts.append({**p, "elo_before": c["elo_before"], "elo_base_delta": c["base_delta"],
+                                  "utgangs_bonus": bonus, "elo_delta": total, "elo_after": after})
+            st["rating"] = after
+            st["matches_played"] += 1
+            st["wins"] += 1 if is_win else 0
+            st["losses"] += 0 if is_win else 1
+            st["last_places"] += 1 if is_last else 0
+            st["win_streak"], st["loss_streak"] = new_win, new_loss
+            st["max_win_streak"] = max(st["max_win_streak"], new_win)
+        if not frozen:
+            await db.matches.update_one({"id": m["id"]}, {"$set": {"participants": new_parts}})
+    for uid, st in state.items():
+        await db.users.update_one({"id": uid}, {"$set": st})
+
+
+@api.put("/matches/{match_id}")
+async def edit_match(match_id: str, data: MatchEditInput, admin: dict = Depends(require_admin)):
+    old = await db.matches.find_one({"id": match_id}, {"_id": 0})
+    if not old:
+        raise HTTPException(status_code=404, detail="Matchen hittades inte")
+    validate_participants(data.participants)
+    for p in data.participants:
+        if not await db.users.find_one({"id": p.user_id}, {"_id": 0, "id": 1}):
+            raise HTTPException(status_code=400, detail="En vald spelare finns inte")
+    await make_backup("edit", match_id, admin["id"])
+    n = len(data.participants)
+    new_parts = [{
+        "user_id": p.user_id, "placement": p.placement, "table_position": p.table_position,
+        # den som kom sist har inget utgångskort
+        "exit_card_value": None if p.placement == n else p.exit_card_value,
+        "exit_card_suit": None if p.placement == n else p.exit_card_suit,
+    } for p in data.participants]
+    await db.matches.update_one({"id": match_id}, {"$set": {
+        "participants": new_parts, "rule_ids": data.rule_ids,
+        "edited_at": now_iso(), "edited_by": admin["id"]}})
+    await replay_matches(match_key(old))
+    m = await db.matches.find_one({"id": match_id}, {"_id": 0})
+    return await build_match_summary(m)
+
+
+@api.delete("/matches/{match_id}")
+async def delete_match(match_id: str, admin: dict = Depends(require_admin)):
+    old = await db.matches.find_one({"id": match_id}, {"_id": 0})
+    if not old:
+        raise HTTPException(status_code=404, detail="Matchen hittades inte")
+    await make_backup("delete", match_id, admin["id"])
+    await db.matches.delete_one({"id": match_id})
+    await db.comments.delete_many({"match_id": match_id})
+    await replay_matches(match_key(old))
+    return {"ok": True}
+
+
 app.include_router(api)
 
 app.add_middleware(
@@ -761,17 +913,66 @@ async def ensure_user(name, email, pw, nickname=None, icon=None):
     return uid
 
 
+BASE_RULES = [
+    {"name": "Tvåan nollställer", "icon": "card:2", "category": "special",
+     "description": "En 2:a nollställer högen – nästa spelare får lägga valfritt kort."},
+    {"name": "Tian vänder", "icon": "card:10", "category": "special",
+     "description": "En 10:a vänder bort hela högen ur spel. Den som lade tian lägger vidare på en tom hög."},
+    {"name": "Byta kort", "icon": "ArrowLeftRight", "category": "special",
+     "description": "Innan spelet startar får du byta kort mellan handen och de uppvända korten framför dig."},
+    {"name": "Chansa", "icon": "Dices", "category": "special",
+     "description": "Kan du inte lägga över kortet på högen får du, istället för att plocka upp, chansa: ta ett kort blint från draghögen och lägg det. Är det för lågt måste du plocka upp hela högen."},
+    {"name": "Fejka", "icon": "EyeOff", "category": "special",
+     "description": "Du får lägga ett kort upp och ner. De andra får syna det genom att vända det: är kortet giltigt måste den som synade plocka upp högen, annars måste du plocka upp den."},
+    {"name": "Kasta in kort", "icon": "Hand", "category": "special",
+     "description": "Ser du att någon är på väg att lägga ett kort du också har får du kasta in ditt av samma valör. Hinner den andra lägga sitt blir det lagt som vanligt."},
+    {"name": "Dubbel/trippel", "icon": "Layers", "category": "special",
+     "description": "Du får lägga flera kort av samma valör samtidigt. Blir du påkommen med att korten inte matchar måste du plocka upp dem och får då bara lägga ett."},
+    {"name": "Superregeln", "icon": "ShieldCheck", "category": "special",
+     "description": "Allt kaos – bluffar, inkast och dubbelläggningar – kan ifrågasättas tills nästa spelare lagt sitt kort ovanpå. Därefter är det låst och godkänt."},
+]
+
+DEFAULT_POSITIONS = ["Dealer", "Andra hand", "Mittemot", "Cutoff", "Hijack", "Sista hand",
+                     "Sjunde hand", "Åttonde hand"]
+
+
+async def restore_base_rules():
+    """Lägger tillbaka grundreglerna EN gång. Rör aldrig befintliga regler och skapar inga dubbletter."""
+    if await db.meta.find_one({"key": "base_rules_restored_v1"}):
+        return
+    have = {(r.get("name") or "").strip().lower()
+            for r in await db.rules.find({"is_base": True}, {"_id": 0, "name": 1}).to_list(500)}
+    for r in BASE_RULES:
+        if r["name"].lower() in have:
+            continue
+        await db.rules.insert_one({"id": str(uuid.uuid4()), **r, "is_base": True,
+                                   "created_by": None, "created_at": now_iso()})
+    await db.meta.insert_one({"key": "base_rules_restored_v1", "at": now_iso()})
+
+
+async def ensure_positions(min_count: int = MAX_PLAYERS):
+    """Se till att det finns minst 8 bordspositioner (behövs för 7–8 spelare). Lägger bara till, tar aldrig bort."""
+    existing = await db.positions.find({}, {"_id": 0}).to_list(200)
+    names = {p["name"] for p in existing}
+    next_order = max([p.get("order", 0) for p in existing], default=-1) + 1
+    for i in range(len(existing), min_count):
+        name = DEFAULT_POSITIONS[i] if i < len(DEFAULT_POSITIONS) else f"Plats {i + 1}"
+        if name in names:
+            name = f"Plats {i + 1}"
+        await db.positions.insert_one({"id": str(uuid.uuid4()), "name": name, "order": next_order})
+        names.add(name)
+        next_order += 1
+
+
 async def seed():
     await db.users.create_index("email", unique=True)
     await db.user_sessions.create_index("session_token")
     await db.monthly_votes.create_index([("month", 1), ("voter", 1)], unique=True)
 
-    # Skarp lansering: inga testkonton eller demodata seedas längre.
-    # Regelbibliotek, positioner och patch notes finns redan i databasen.
-    # Det första riktiga kontot skapas via registrering med inbjudningskod.
-    return
-
-
+    # Skarp lansering: inga testkonton eller demodata seedas. Inget raderas här.
+    # Läggs bara till om det saknas: grundregler (en gång) och bordspositioner upp till 8.
+    await restore_base_rules()
+    await ensure_positions()
 
 
 @app.on_event("startup")

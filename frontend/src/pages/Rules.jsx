@@ -10,7 +10,7 @@ import { toast } from "sonner";
 import { Loader2, Trash2, Pencil, Plus, ArrowDownUp } from "lucide-react";
 
 const GAME_RULES = [
-  { h: "Grunduppsättning", p: ["Turn10 spelas med två kortlekar så att 3–6 spelare kan vara med.", "Varje spelare får tre kort nedvända framför sig, tre uppvända ovanpå dessa, och tre kort på hand.", "Kortvärde (lägst→högst): 2, 3, 4, 5, 6, 7, 8, 9, 10, knekt (11), dam (12), kung (13), ess (14). Klädda kort räknas alltså INTE som 10."] },
+  { h: "Grunduppsättning", p: ["Turn10 spelas med två kortlekar så att 3–8 spelare kan vara med.", "Varje spelare får tre kort nedvända framför sig, tre uppvända ovanpå dessa, och tre kort på hand.", "Kortvärde (lägst→högst): 2, 3, 4, 5, 6, 7, 8, 9, 10, knekt (11), dam (12), kung (13), ess (14). Klädda kort räknas alltså INTE som 10."] },
   { h: "Spelets gång", p: ["Spelaren med lägst kort på hand lägger först.", "Kort läggs i stigande ordning – du måste lägga ett högre kort än det översta (eller en kombination enligt dubbel/trippel).", "Kan du inte lägga högre måste du plocka upp hela högen på bordet.", "Chansa: istället för att plocka upp direkt kan du dra ett blint kort från draghögen och lägga det utan att titta. Är det högt nog gäller det – annars plockar du ändå upp hela högen."] },
   { h: "Specialkort", p: ["Tvåan (2): nollställer högen. Nästa spelare får lägga valfritt kort.", "Tian (10): vänder bort hela högen ur spel. Den som lade tian lägger vidare på en tom hög."] },
   { h: "Fusk / bluff (\"fejka\")", p: ["Du får lägga ett kort dolt (upp och ner) i högen.", "Vem som helst får syna genom att vända kortet.", "Är kortet giltigt när det synas → den som synade plockar upp hela högen.", "Är kortet ogiltigt (misslyckad bluff) → du som lade det plockar upp hela högen."] },
