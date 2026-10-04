@@ -29,6 +29,7 @@ db = client[os.environ['DB_NAME']]
 JWT_SECRET = os.environ['JWT_SECRET']
 JWT_ALG = "HS256"
 INVITE_CODE = os.environ.get("INVITE_CODE", "267710")
+BUILD_ID = "patch-2"
 MIN_PLAYERS = 3
 MAX_PLAYERS = 8
 TOKEN_DAYS = 30
@@ -692,6 +693,16 @@ async def root():
     return {"message": "Turn10 API"}
 
 
+@api.get("/version")
+async def version():
+    """Öppna /api/version i webbläsaren för att se vilken backend-kod som faktiskt körs."""
+    return {
+        "build": BUILD_ID, "max_players": MAX_PLAYERS,
+        "base_rules": await db.rules.count_documents({"is_base": True}),
+        "positions": await db.positions.count_documents({}),
+    }
+
+
 async def recompute_all():
     """Nollställ och räkna om alla spelares statistik/Elo från kvarvarande matcher."""
     await db.users.update_many({}, {"$set": {
@@ -736,6 +747,8 @@ async def recompute_all():
 @api.post("/admin/clear-testdata")
 async def clear_testdata(user: dict = Depends(get_current_user)):
     """Radera testspelarna (erik/johan/anders/sara/lisa) + deras matcher/kommentarer och räkna om."""
+    if not is_admin(user):
+        raise HTTPException(status_code=403, detail="Endast admin kan göra det här")
     test_emails = ["erik@test.se", "johan@test.se", "anders@test.se", "sara@test.se", "lisa@test.se"]
     test_users = await db.users.find({"email": {"$in": test_emails}}, {"_id": 0}).to_list(100)
     ids = [u["id"] for u in test_users]
@@ -964,15 +977,24 @@ async def ensure_positions(min_count: int = MAX_PLAYERS):
         next_order += 1
 
 
-async def seed():
-    await db.users.create_index("email", unique=True)
-    await db.user_sessions.create_index("session_token")
-    await db.monthly_votes.create_index([("month", 1), ("voter", 1)], unique=True)
+async def _seed_step(label, make_coro):
+    """Kör ett startsteg isolerat: ett fel i ett steg får aldrig stoppa de andra."""
+    try:
+        await make_coro()
+        logger.info(f"Startsteg OK: {label}")
+    except Exception as e:  # noqa: BLE001
+        logger.error(f"Startsteg MISSLYCKADES: {label}: {e!r}")
 
+
+async def seed():
     # Skarp lansering: inga testkonton eller demodata seedas. Inget raderas här.
     # Läggs bara till om det saknas: grundregler (en gång) och bordspositioner upp till 8.
-    await restore_base_rules()
-    await ensure_positions()
+    await _seed_step("grundregler", restore_base_rules)
+    await _seed_step("bordspositioner", ensure_positions)
+    await _seed_step("index users.email", lambda: db.users.create_index("email", unique=True))
+    await _seed_step("index user_sessions", lambda: db.user_sessions.create_index("session_token"))
+    await _seed_step("index monthly_votes",
+                     lambda: db.monthly_votes.create_index([("month", 1), ("voter", 1)], unique=True))
 
 
 @app.on_event("startup")

@@ -50,6 +50,13 @@ export default function Profile() {
           <div className="text-xs text-slate-500 font-mono">Rating {user?.rating}</div>
         </div>
 
+        {user?.is_admin && (
+          <div data-testid="admin-badge" className="p-3 rounded-xl bg-violet-500/10 border border-violet-500/30">
+            <div className="text-xs uppercase tracking-wider text-violet-300 font-mono mb-1">Admin</div>
+            <p className="text-sm text-slate-300">Du är admin. Öppna en match under Historik: där finns knapparna <b>Redigera</b> och <b>Ta bort</b>.</p>
+          </div>
+        )}
+
         <div>
           <label className="text-xs uppercase tracking-wider text-slate-400 font-mono mb-2 block">Smeknamn</label>
           <input data-testid="nickname-input" value={nickname} onChange={(e) => setNickname(e.target.value)} placeholder="Ditt smeknamn"
@@ -99,11 +106,11 @@ export default function Profile() {
             <LogOut className="w-5 h-5" />
             <span className="flex-1 text-left font-medium">Logga ut</span>
           </button>
-          <button data-testid="clear-testdata-button" onClick={clearTestData} disabled={clearing}
+          {user?.is_admin && <button data-testid="clear-testdata-button" onClick={clearTestData} disabled={clearing}
             className="w-full flex items-center gap-3 p-3.5 rounded-xl bg-rose-950/40 border border-rose-900/50 active:bg-rose-950/60 text-rose-300 disabled:opacity-60">
             {clearing ? <Loader2 className="w-5 h-5 animate-spin" /> : <Trash2 className="w-5 h-5" />}
             <span className="flex-1 text-left font-medium">Rensa testdata (testspelare & deras matcher)</span>
-          </button>
+          </button>}
         </div>
       </div>
     </div>
